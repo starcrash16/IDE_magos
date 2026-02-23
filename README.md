@@ -2,8 +2,7 @@
 --- 
 
 ## Para que jale deben instalar:
-bash```
-pip install PySide6
 ```
+pip install PySide6```
 
 arriba las chivas papus
