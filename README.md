@@ -4,5 +4,3 @@
 ## Para que jale deben instalar:
 ```
 pip install PySide6```
-
-arriba las chivas papus
