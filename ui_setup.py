@@ -3,10 +3,109 @@ Contiene toda la lógica de creación y configuración de widgets.
 Se usa como clase base en main.py:
     class CompiladorIDE(SetupInterfaz, QMainWindow)
 """
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QTextEdit, QTabWidget,
-                               QTableWidget, QToolBar, QStatusBar)
-from PySide6.QtGui import QAction
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QTabWidget,
+    QTableWidget, QToolBar, QStatusBar, QStyle,
+    QLabel, QPlainTextEdit, QTextEdit
+)
+from PySide6.QtGui import QAction, QPainter, QTextFormat, QFontDatabase
+from PySide6.QtCore import Qt, QRect, QSize
 
+class LineNumberArea(QWidget):
+    def __init__(self, editor):
+        super().__init__(editor)
+        self.codeEditor = editor
+
+    def sizeHint(self):
+        return QSize(self.codeEditor.lineNumberAreaWidth(), 0)
+
+    def paintEvent(self, event):
+        self.codeEditor.lineNumberAreaPaintEvent(event)
+
+
+class CodeEditor(QPlainTextEdit):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        self._lineNumberArea = LineNumberArea(self)
+
+        # señales para refrescar gutter
+        self.blockCountChanged.connect(self.updateLineNumberAreaWidth)
+        self.updateRequest.connect(self.updateLineNumberArea)
+        self.cursorPositionChanged.connect(self.highlightCurrentLine)
+
+        self.updateLineNumberAreaWidth(0)
+        self.highlightCurrentLine()
+
+        # evita saltos en el scroll horizontal
+        
+        self.setLineWrapMode(QPlainTextEdit.NoWrap)
+
+    def lineNumberAreaWidth(self):
+        digits = len(str(max(1, self.blockCount())))
+        # 3px margen + ancho por dígito
+        space = 3 + self.fontMetrics().horizontalAdvance('9') * digits
+        return space
+
+    def updateLineNumberAreaWidth(self, _):
+        self.setViewportMargins(self.lineNumberAreaWidth(), 0, 0, 0)
+
+    def updateLineNumberArea(self, rect, dy):
+        if dy:
+            self._lineNumberArea.scroll(0, dy)
+        else:
+            self._lineNumberArea.update(0, rect.y(), self._lineNumberArea.width(), rect.height())
+
+        if rect.contains(self.viewport().rect()):
+            self.updateLineNumberAreaWidth(0)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        cr = self.contentsRect()
+        self._lineNumberArea.setGeometry(QRect(cr.left(), cr.top(), self.lineNumberAreaWidth(), cr.height()))
+
+    def lineNumberAreaPaintEvent(self, event):
+        painter = QPainter(self._lineNumberArea)
+        painter.fillRect(event.rect(), self.palette().window())
+
+        block = self.firstVisibleBlock()
+        blockNumber = block.blockNumber()
+        top = int(self.blockBoundingGeometry(block).translated(self.contentOffset()).top())
+        bottom = top + int(self.blockBoundingRect(block).height())
+
+        while block.isValid() and top <= event.rect().bottom():
+            if block.isVisible() and bottom >= event.rect().top():
+                number = str(blockNumber + 1)
+                painter.setPen(self.palette().text().color())
+                painter.drawText(
+                    0, top, self._lineNumberArea.width() - 4, self.fontMetrics().height(),
+                    Qt.AlignRight, number
+                )
+
+            block = block.next()
+            blockNumber += 1
+            top = bottom
+            bottom = top + int(self.blockBoundingRect(block).height())
+
+    def highlightCurrentLine(self):
+        extraSelections = []
+
+        if not self.isReadOnly():
+            selection = QTextEdit.ExtraSelection()
+            selection.format.setBackground(self.palette().alternateBase())
+            selection.format.setProperty(QTextFormat.FullWidthSelection, True)
+
+            selection.cursor = self.textCursor()
+            selection.cursor.clearSelection()
+            extraSelections.append(selection)
+
+        self.setExtraSelections(extraSelections)
+
+    def cursorLineColumn(self):
+        c = self.textCursor()
+        line = c.blockNumber() + 1
+        col = c.positionInBlock() + 1
+        return line, col
 
 class SetupInterfaz:
     """Clase que agrupa todos los métodos de construcción de la interfaz."""
@@ -35,10 +134,13 @@ class SetupInterfaz:
         layout_principal = QVBoxLayout(widget_central)
         self.setCentralWidget(widget_central)
 
-        # 2. Editor de Texto 
-        # (Requerimiento 3.1)
-        self.editor = QTextEdit()
-        # Conectar el movimiento del cursor a la barra de estado
+        # 2. Editor de Texto (IDE real: CodeEditor)
+        self.editor = CodeEditor()
+
+        # Fuente monoespaciada del sistema (tipo Consolas / Courier New, depende OS)
+        fixed_font = QFontDatabase.systemFont(QFontDatabase.FixedFont)
+        self.editor.setFont(fixed_font)
+
         self.editor.cursorPositionChanged.connect(self.actualizar_posicion_cursor)
         layout_principal.addWidget(self.editor, stretch=6)
 
@@ -48,10 +150,14 @@ class SetupInterfaz:
         self.configurar_paneles_resultados()
         layout_principal.addWidget(self.tabs_resultados, stretch=4)
 
-        # 4. Barra de Estado 
-        # (Requerimiento 3.1.c - Visualización de columna y línea)
+        # 4. Barra de Estado
         self.barra_estado = QStatusBar()
         self.setStatusBar(self.barra_estado)
+
+        # Widgets permanentes (no se pisan con showMessage)
+        self.lbl_pos = QLabel("Línea: 1 | Columna: 1")
+        self.barra_estado.addPermanentWidget(self.lbl_pos)
+
         self.actualizar_posicion_cursor()
 
     # ─── Menús ────────────────────────────────────────────────────────────────
@@ -60,65 +166,85 @@ class SetupInterfaz:
         """Crea la barra de menús superior y configura sus acciones."""
         barra_menus = self.menuBar()
 
-        # Contiene funciones básicas como Nuevo, Abrir y Guardar
+        # ── Menú Archivo ─────────────────────────────────────────────────────────
         menu_archivo = barra_menus.addMenu("Archivo")
 
-        # Acción para crear un nuevo archivo
-        accion_nuevo = QAction("Nuevo", self)
-        accion_nuevo.triggered.connect(self.nuevo_archivo)
-        menu_archivo.addAction(accion_nuevo)
+        self.act_nuevo = QAction(self.style().standardIcon(QStyle.SP_FileIcon), "Nuevo", self)
+        self.act_nuevo.setShortcut("Ctrl+N")
+        self.act_nuevo.setStatusTip("Crear un archivo nuevo")
+        self.act_nuevo.triggered.connect(self.nuevo_archivo)
+        menu_archivo.addAction(self.act_nuevo)
 
-        # Acción para abrir un archivo existente desde el disco
-        accion_abrir = QAction("Abrir", self)
-        accion_abrir.triggered.connect(self.abrir_archivo)
-        menu_archivo.addAction(accion_abrir)
+        self.act_abrir = QAction(self.style().standardIcon(QStyle.SP_DialogOpenButton), "Abrir", self)
+        self.act_abrir.setShortcut("Ctrl+O")
+        self.act_abrir.setStatusTip("Abrir un archivo existente")
+        self.act_abrir.triggered.connect(self.abrir_archivo)
+        menu_archivo.addAction(self.act_abrir)
 
-        # Acción para guardar los cambios en el archivo actual
-        accion_guardar = QAction("Guardar", self)
-        accion_guardar.triggered.connect(self.guardar_archivo)
-        menu_archivo.addAction(accion_guardar)
+        self.act_guardar = QAction(self.style().standardIcon(QStyle.SP_DialogSaveButton), "Guardar", self)
+        self.act_guardar.setShortcut("Ctrl+S")
+        self.act_guardar.setStatusTip("Guardar el archivo actual")
+        self.act_guardar.triggered.connect(self.guardar_archivo)
+        menu_archivo.addAction(self.act_guardar)
 
-        # Acción para guardar el contenido actual con un nombre nuevo
-        accion_guardar_como = QAction("Guardar como", self)
-        accion_guardar_como.triggered.connect(self.guardar_como_archivo)
-        menu_archivo.addAction(accion_guardar_como)
+        self.act_guardar_como = QAction(self.style().standardIcon(QStyle.SP_DialogSaveButton), "Guardar como", self)
+        self.act_guardar_como.setShortcut("Ctrl+Shift+S")
+        self.act_guardar_como.setStatusTip("Guardar con un nombre nuevo")
+        self.act_guardar_como.triggered.connect(self.guardar_como_archivo)
+        menu_archivo.addAction(self.act_guardar_como)
 
-        # Separador visual (opcional si se desea en el futuro) y acción de salir
-        accion_salir = QAction("Salir", self)
-        accion_salir.triggered.connect(self.close)
-        menu_archivo.addAction(accion_salir)
+        menu_archivo.addSeparator()
 
-        # Menú Compilar
-        # Define el acceso a las fases principales del proceso de compilación
+        self.act_salir = QAction(self.style().standardIcon(QStyle.SP_DialogCloseButton), "Salir", self)
+        self.act_salir.setShortcut("Alt+F4")
+        self.act_salir.setStatusTip("Cerrar el IDE")
+        self.act_salir.triggered.connect(self.close)
+        menu_archivo.addAction(self.act_salir)
+
+        # ── Menú Compilar ────────────────────────────────────────────────────────
         menu_compilar = barra_menus.addMenu("Compilar")
-        fases = [
-            "Análisis Léxico", 
-            "Análisis Sintáctico", 
-            "Análisis Semántico",
-            "Generación de Código Intermedio", 
-            "Ejecución"
-        ]
-        
-        # Generar las opciones del menú de forma iterativa, nomas para ahorrar código pa
-        for fase in fases:
-            act = QAction(fase, self)
-            menu_compilar.addAction(act)
 
+        self.act_lexico = QAction(self.style().standardIcon(QStyle.SP_FileDialogContentsView), "Ejecutar Léxico", self)
+        self.act_sintactico = QAction(self.style().standardIcon(QStyle.SP_FileDialogContentsView), "Ejecutar Sintáctico", self)
+        self.act_semantico = QAction(self.style().standardIcon(QStyle.SP_FileDialogContentsView), "Ejecutar Semántico", self)
+        self.act_intermedio = QAction(self.style().standardIcon(QStyle.SP_ComputerIcon), "Generar Cód. Intermedio", self)
+        self.act_ejecutar = QAction(self.style().standardIcon(QStyle.SP_CommandLink), "Ejecutar", self)
+
+        menu_compilar.addAction(self.act_lexico)
+        menu_compilar.addAction(self.act_sintactico)
+        menu_compilar.addAction(self.act_semantico)
+        menu_compilar.addAction(self.act_intermedio)
+        menu_compilar.addSeparator()
+        menu_compilar.addAction(self.act_ejecutar)
+
+        menu_compilar.addAction(self.act_lexico)
+        menu_compilar.addAction(self.act_sintactico)
+        menu_compilar.addAction(self.act_semantico)
+        menu_compilar.addAction(self.act_intermedio)
+        menu_compilar.addSeparator()
+        menu_compilar.addAction(self.act_ejecutar)
+        
     # ─── Barra de Herramientas ────────────────────────────────────────────────
 
     def crear_barra_herramientas(self):
-        # Botones de acceso rápido 
-        # (Requerimiento 2.2)
         toolbar = QToolBar("Acceso Rápido")
+        toolbar.setMovable(False)      # se siente más IDE
+        toolbar.setFloatable(False)
         self.addToolBar(toolbar)
 
-        btn_lexico     = QAction("Ejecutar Léxico", self)
-        btn_sintactico = QAction("Ejecutar Sintáctico", self)
-        btn_ejecutar   = QAction("Ejecutar Todo", self)
+        # --- Archivo
+        toolbar.addAction(self.act_nuevo)
+        toolbar.addAction(self.act_abrir)
+        toolbar.addAction(self.act_guardar)
+        toolbar.addSeparator()
 
-        toolbar.addAction(btn_lexico)
-        toolbar.addAction(btn_sintactico)
-        toolbar.addAction(btn_ejecutar)
+        # --- Compilar
+        toolbar.addAction(self.act_lexico)
+        toolbar.addAction(self.act_sintactico)
+        toolbar.addAction(self.act_semantico)
+        toolbar.addAction(self.act_intermedio)
+        toolbar.addSeparator()
+        toolbar.addAction(self.act_ejecutar)
 
     # ─── Paneles de Resultados ────────────────────────────────────────────────
     
@@ -193,8 +319,18 @@ class SetupInterfaz:
     """
 
     def actualizar_posicion_cursor(self):
-        # Obtener la posición actual del cursor en el editor
-        cursor = self.editor.textCursor()
-        linea   = cursor.blockNumber() + 1
-        columna = cursor.columnNumber() + 1
-        self.barra_estado.showMessage(f"Línea: {linea} | Columna: {columna}")
+        # Si usas CodeEditor:
+        if hasattr(self.editor, "cursorLineColumn"):
+            linea, columna = self.editor.cursorLineColumn()
+        else:
+            # fallback si algún día vuelves a QTextEdit
+            cursor = self.editor.textCursor()
+            linea = cursor.blockNumber() + 1
+            columna = cursor.columnNumber() + 1
+
+        # label permanente
+        if hasattr(self, "lbl_pos"):
+            self.lbl_pos.setText(f"Línea: {linea} | Columna: {columna}")
+        else:
+            # fallback
+            self.barra_estado.showMessage(f"Línea: {linea} | Columna: {columna}")

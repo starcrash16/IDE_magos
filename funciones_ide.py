@@ -18,8 +18,11 @@ Logica:
     previamente abierto y actualiza el título de la ventana para indicar un nuevo documento.
 """
 def nuevo_archivo(self):
-    # Limpia el editor y resetea la ruta actual
+    if not _confirmar_perder_cambios_o_guardar(self):
+        return
+
     self.editor.clear()
+    self.editor.document().setModified(False)
     self.archivo_actual = None
     self.setWindowTitle("IDE Compiladores - Fase 1 (Nuevo Archivo)")
 
@@ -36,7 +39,9 @@ Logica:
     Ya después definiremos si se puede abrir cualquier tipo de archivo o solo nuestra extensión
 """
 def abrir_archivo(self):
-    # Abre el explorador para seleccionar un archivo
+    if not _confirmar_perder_cambios_o_guardar(self):
+        return
+
     ruta_archivo, _ = QFileDialog.getOpenFileName(
         self, "Abrir Archivo", "", "Archivos de texto (*.txt);;Todos los archivos (*)"
     )
@@ -47,6 +52,7 @@ def abrir_archivo(self):
                 contenido = archivo.read()
                 self.editor.setPlainText(contenido)
 
+            self.editor.document().setModified(False)
             self.archivo_actual = ruta_archivo
             self.setWindowTitle(f"IDE Compiladores - {ruta_archivo}")
         except Exception as e:
@@ -69,7 +75,8 @@ def guardar_archivo(self):
             with open(self.archivo_actual, 'w', encoding='utf-8') as archivo:
                 contenido = self.editor.toPlainText()
                 archivo.write(contenido)
-
+            # Resetear el estado "modificado": ya no hay cambios pendientes (se acaba de abrir/guardar/limpiar).
+            self.editor.document().setModified(False)
             # Se muestra un pequeño mensaje en la barra de estado
             self.barra_estado.showMessage("Archivo guardado exitosamente.", 3000)
         except Exception as e:
@@ -114,3 +121,48 @@ def cerrar_archivo(self):
     self.editor.clear()
     self.archivo_actual = None
     self.setWindowTitle("IDE Compiladores - Fase 1")
+
+def _hay_cambios_sin_guardar(self) -> bool:
+    """
+    True si el documento del editor está modificado (Qt lo trackea)
+    o si hay texto y no hay archivo_actual.
+    """
+    doc = self.editor.document()
+    if doc.isModified():
+        return True
+
+    # opcional: si hay texto aunque no marque modified
+    if self.editor.toPlainText().strip() and not self.archivo_actual:
+        return True
+
+    return False
+
+
+def _confirmar_perder_cambios_o_guardar(self) -> bool:
+    """
+    Devuelve True si se permite continuar (abrir/nuevo),
+    False si el usuario cancela.
+    """
+    if not _hay_cambios_sin_guardar(self):
+        return True
+
+    msg = QMessageBox(self)
+    msg.setIcon(QMessageBox.Warning)
+    msg.setWindowTitle("Cambios sin guardar")
+    msg.setText("Hay cambios sin guardar.")
+    msg.setInformativeText("Si continúas, se perderá la información no guardada. ¿Deseas continuar?")
+    msg.setStandardButtons(QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel)
+    msg.setDefaultButton(QMessageBox.Save)
+
+    r = msg.exec()
+
+    if r == QMessageBox.Save:
+        self.guardar_archivo()
+        # Si el usuario cancela el diálogo de guardar, no continúes.
+        # (guarda_archivo puede terminar sin ruta si el user cancela)
+        return not _hay_cambios_sin_guardar(self)
+
+    if r == QMessageBox.Discard:
+        return True
+
+    return False  # Cancel
