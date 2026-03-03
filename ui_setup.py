@@ -4,12 +4,19 @@ Se usa como clase base en main.py:
     class CompiladorIDE(SetupInterfaz, QMainWindow)
 """
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QTabWidget,
-    QTableWidget, QToolBar, QStatusBar, QStyle,
-    QLabel, QPlainTextEdit, QTextEdit
+    QWidget, QVBoxLayout, QHBoxLayout,
+    QTabWidget, QTableWidget, QToolBar,
+    QStatusBar, QStyle, QLabel,
+    QPlainTextEdit, QTextEdit,
+    QTreeView
 )
+
+from PySide6.QtWidgets import QFileSystemModel
+from PySide6.QtCore import QDir
 from PySide6.QtGui import QAction, QPainter, QTextFormat, QFontDatabase
 from PySide6.QtCore import Qt, QRect, QSize
+from PySide6.QtWidgets import QTreeView
+from PySide6.QtWidgets import QSplitter
 
 class LineNumberArea(QWidget):
     def __init__(self, editor):
@@ -124,35 +131,149 @@ class SetupInterfaz:
     - connect(metodo): Conecta una señal (evento) con una ranura (función a ejecutar).
     """
 
+    def crear_barra_actividades(self):
+        self.barra_actividades = QFrame()
+        self.barra_actividades.setFixedWidth(50)
+        self.barra_actividades.setStyleSheet("""
+            QFrame {
+                background-color: #2d2d2d;
+            }
+            QPushButton {
+                border: none;
+                padding: 10px;
+                color: white;
+            }
+            QPushButton:hover {
+                background-color: #3e3e3e;
+            }
+        """)
+
+        layout = QVBoxLayout(self.barra_actividades)
+        layout.setAlignment(Qt.AlignTop)
+
+        # Botones estilo VS Code
+        self.btn_explorador = QPushButton("📁")
+        self.btn_buscar = QPushButton("🔍")
+        self.btn_compilar = QPushButton("⚙")
+        self.btn_ejecutar = QPushButton("▶")
+
+        layout.addWidget(self.btn_explorador)
+        layout.addWidget(self.btn_buscar)
+        layout.addWidget(self.btn_compilar)
+        layout.addWidget(self.btn_ejecutar)
+        # ─── Explorer tipo VS Code ─────────────────────────────
+    def crear_explorer(self):
+        self.explorer_model = QFileSystemModel()
+        self.explorer_model.setRootPath(QDir.currentPath())
+
+        self.explorer = QTreeView()
+        self.explorer.setModel(self.explorer_model)
+        self.explorer.setRootIndex(
+            self.explorer_model.index(QDir.currentPath())
+        )
+
+        # Mostrar solo la columna del nombre
+        self.explorer.hideColumn(1)
+        self.explorer.hideColumn(2)
+        self.explorer.hideColumn(3)
+
+        # Estilo oscuro tipo VS Code
+        self.explorer.setStyleSheet("""
+            QTreeView {
+                background-color: #1e1e1e;
+                color: #d4d4d4;
+                border: none;
+            }
+            QTreeView::item:selected {
+                background-color: #264f78;
+            }
+        """)
+
+        # Doble clic abre archivo
+        self.explorer.doubleClicked.connect(self.abrir_archivo_desde_explorer)
+
+
+    def abrir_archivo_desde_explorer(self, index):
+        ruta = self.explorer_model.filePath(index)
+
+        if not self.explorer_model.isDir(index):
+            try:
+                with open(ruta, "r", encoding="utf-8") as f:
+                    contenido = f.read()
+                    self.editor.setPlainText(contenido)
+            except Exception as e:
+                self.barra_estado.showMessage(f"Error al abrir archivo: {e}")
+
     def inicializar_interfaz(self):
+
+
         # 1. Configurar Menús y Barra de Herramientas
         self.crear_menus()
         self.crear_barra_herramientas()
 
+        # ─────────────────────────────────────────────
         # Widget Central Principal
+        # ─────────────────────────────────────────────
         widget_central = QWidget()
         layout_principal = QVBoxLayout(widget_central)
+        layout_principal.setContentsMargins(0, 0, 0, 0)
         self.setCentralWidget(widget_central)
 
-        # 2. Editor de Texto (IDE real: CodeEditor)
+        # ─────────────────────────────────────────────
+        # Splitter Horizontal (Explorer | Editor+Tabs)
+        # ─────────────────────────────────────────────
+        splitter = QSplitter(Qt.Horizontal)
+
+        layout_principal.addWidget(splitter)
+
+        # ─────────────────────────────────────────────
+        # Explorer
+        # ─────────────────────────────────────────────
+        self.crear_explorer()
+        splitter.addWidget(self.explorer)
+
+        # ─────────────────────────────────────────────
+        # Contenedor Derecho
+        # ─────────────────────────────────────────────
+        contenedor_derecho = QWidget()
+        layout_editor = QVBoxLayout(contenedor_derecho)
+        layout_editor.setContentsMargins(0, 0, 0, 0)
+
+        splitter.addWidget(contenedor_derecho)
+
+        # Proporciones iniciales (Explorer pequeño)
+        splitter.setSizes([250, 900])
+
+        # ─────────────────────────────────────────────
+        # Editor
+        # ─────────────────────────────────────────────
         self.editor = CodeEditor()
 
-        # Fuente monoespaciada del sistema (tipo Consolas / Courier New, depende OS)
         fixed_font = QFontDatabase.systemFont(QFontDatabase.FixedFont)
         self.editor.setFont(fixed_font)
 
         self.editor.cursorPositionChanged.connect(self.actualizar_posicion_cursor)
-        layout_principal.addWidget(self.editor, stretch=6)
 
-        # 3. Paneles de Resultados 
-        # (Requerimientos 3.2 al 3.8)
+        layout_editor.addWidget(self.editor, stretch=6)
+
+        # ─────────────────────────────────────────────
+        # Tabs
+        # ─────────────────────────────────────────────
         self.tabs_resultados = QTabWidget()
         self.configurar_paneles_resultados()
-        layout_principal.addWidget(self.tabs_resultados, stretch=4)
 
-        # 4. Barra de Estado
+        layout_editor.addWidget(self.tabs_resultados, stretch=4)
+
+        # ─────────────────────────────────────────────
+        # Barra de Estado
+        # ─────────────────────────────────────────────
         self.barra_estado = QStatusBar()
         self.setStatusBar(self.barra_estado)
+
+        self.lbl_pos = QLabel("Línea: 1 | Columna: 1")
+        self.barra_estado.addPermanentWidget(self.lbl_pos)
+
+        self.actualizar_posicion_cursor()
 
         # Widgets permanentes (no se pisan con showMessage)
         self.lbl_pos = QLabel("Línea: 1 | Columna: 1")
