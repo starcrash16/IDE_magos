@@ -1,12 +1,16 @@
 """
 funciones_ide.py
-Funciones de manejo de archivos para CompiladorIDE.
+Funciones de manejo de archivos y ejecución del compilador para CompiladorIDE.
 Se importan en main.py y se asignan como métodos de la clase.
 """
 
 # QFileDialog: Abre el explorador de archivos para seleccionar un archivo.
 # QMessageBox: Muestra mensajes de error o información al usuario.
-from PySide6.QtWidgets import QFileDialog, QMessageBox
+import subprocess
+import json
+import os
+
+from PySide6.QtWidgets import QFileDialog, QMessageBox, QTableWidgetItem
 
 
 """
@@ -166,3 +170,131 @@ def _confirmar_perder_cambios_o_guardar(self) -> bool:
         return True
 
     return False  # Cancel
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Ejecución del Analizador Léxico (Fase 2)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def ejecutar_lexico(self):
+    """
+    Ejecuta el analizador léxico sobre el archivo actual.
+    1. Guarda el archivo (o pide guardarlo si es nuevo).
+    2. Invoca lexer.py vía subprocess.run() (comunicación IPC).
+    3. Parsea el JSON de stdout.
+    4. Llena las tablas de Tokens y Errores.
+    """
+    # ── Paso 1: Asegurar que el archivo está guardado ────────────────────
+    if not self.archivo_actual:
+        QMessageBox.warning(
+            self, "Archivo no guardado",
+            "Debes guardar el archivo antes de ejecutar el análisis léxico."
+        )
+        self.guardar_como_archivo()
+        if not self.archivo_actual:
+            return  # El usuario canceló el diálogo de guardar
+    else:
+        self.guardar_archivo()
+
+    # ── Paso 2: Determinar la ruta del lexer.py ─────────────────────────
+    # El compilador vive en la carpeta hermana "compilador"
+    ruta_ide = os.path.dirname(os.path.abspath(__file__))
+    ruta_compilador = os.path.join(os.path.dirname(ruta_ide), "compilador")
+    ruta_lexer = os.path.join(ruta_compilador, "lexer.py")
+
+    if not os.path.exists(ruta_lexer):
+        QMessageBox.critical(
+            self, "Error",
+            f"No se encontró el analizador léxico en:\n{ruta_lexer}"
+        )
+        return
+
+    # ── Paso 3: Invocar el lexer vía subprocess (IPC) ───────────────────
+    self.barra_estado.showMessage("Ejecutando análisis léxico...", 5000)
+
+    try:
+        resultado = subprocess.run(
+            ["python", ruta_lexer, self.archivo_actual],
+            capture_output=True,
+            text=True,
+            timeout=30,  # Timeout de seguridad (30 segundos)
+        )
+    except subprocess.TimeoutExpired:
+        QMessageBox.critical(
+            self, "Error",
+            "El analizador léxico tardó demasiado (timeout de 30s)."
+        )
+        return
+    except Exception as e:
+        QMessageBox.critical(
+            self, "Error",
+            f"Error al ejecutar el analizador léxico:\n{e}"
+        )
+        return
+
+    # ── Paso 4: Parsear el JSON de stdout ────────────────────────────────
+    salida = resultado.stdout.strip()
+
+    if not salida:
+        error_stderr = resultado.stderr.strip()
+        QMessageBox.critical(
+            self, "Error del Lexer",
+            f"El analizador léxico no produjo salida.\n\nstderr:\n{error_stderr}"
+        )
+        return
+
+    try:
+        datos = json.loads(salida)
+    except json.JSONDecodeError as e:
+        QMessageBox.critical(
+            self, "Error de formato",
+            f"La salida del lexer no es JSON válido:\n{e}\n\nSalida:\n{salida[:500]}"
+        )
+        return
+
+    lista_tokens = datos.get("tokens", [])
+    lista_errores = datos.get("errores", [])
+
+    # ── Paso 5: Llenar la tabla de Tokens ────────────────────────────────
+    self.tabla_tokens.setRowCount(0)  # Limpiar filas existentes
+
+    for token in lista_tokens:
+        fila = self.tabla_tokens.rowCount()
+        self.tabla_tokens.insertRow(fila)
+        self.tabla_tokens.setItem(fila, 0, QTableWidgetItem(str(token.get("linea", ""))))
+        self.tabla_tokens.setItem(fila, 1, QTableWidgetItem(str(token.get("columna", ""))))
+        self.tabla_tokens.setItem(fila, 2, QTableWidgetItem(token.get("tipo", "")))
+        self.tabla_tokens.setItem(fila, 3, QTableWidgetItem(token.get("lexema", "")))
+
+    # Ajustar ancho de columnas al contenido
+    self.tabla_tokens.resizeColumnsToContents()
+
+    # ── Paso 6: Llenar la tabla de Errores ───────────────────────────────
+    self.lista_errores.setRowCount(0)  # Limpiar filas existentes
+
+    for error in lista_errores:
+        fila = self.lista_errores.rowCount()
+        self.lista_errores.insertRow(fila)
+        self.lista_errores.setItem(fila, 0, QTableWidgetItem("Léxico"))
+        self.lista_errores.setItem(fila, 1, QTableWidgetItem(str(error.get("linea", ""))))
+        self.lista_errores.setItem(fila, 2, QTableWidgetItem(str(error.get("columna", ""))))
+        self.lista_errores.setItem(fila, 3, QTableWidgetItem(error.get("descripcion", "")))
+
+    # Ajustar ancho de columnas al contenido
+    self.lista_errores.resizeColumnsToContents()
+
+    # ── Paso 7: Mostrar la pestaña correspondiente ───────────────────────
+    if lista_errores:
+        # Si hay errores, ir a la pestaña de Errores
+        indice_errores = self.tabs_resultados.indexOf(self.lista_errores)
+        self.tabs_resultados.setCurrentIndex(indice_errores)
+        self.barra_estado.showMessage(
+            f"Análisis léxico completado: {len(lista_tokens)} tokens, {len(lista_errores)} error(es)", 5000
+        )
+    else:
+        # Si no hay errores, ir a la pestaña de Tokens
+        indice_tokens = self.tabs_resultados.indexOf(self.tabla_tokens)
+        self.tabs_resultados.setCurrentIndex(indice_tokens)
+        self.barra_estado.showMessage(
+            f"Análisis léxico completado: {len(lista_tokens)} tokens, sin errores ✓", 5000
+        )

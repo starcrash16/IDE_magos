@@ -12,6 +12,7 @@ from funciones_ide import (
     abrir_archivo,
     guardar_archivo,
     guardar_como_archivo,
+    ejecutar_lexico,
 )
 
 class CompiladorIDE(SetupInterfaz, QMainWindow):
@@ -22,7 +23,7 @@ class CompiladorIDE(SetupInterfaz, QMainWindow):
     """
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("IDE Compiladores - Fase 1")
+        self.setWindowTitle("IDE Compiladores - Fase 2")
         self.resize(1200, 800)
         self.archivo_actual = None
         # Definido en SetupInterfaz
@@ -35,6 +36,7 @@ CompiladorIDE.nuevo_archivo        = nuevo_archivo
 CompiladorIDE.abrir_archivo        = abrir_archivo
 CompiladorIDE.guardar_archivo      = guardar_archivo
 CompiladorIDE.guardar_como_archivo = guardar_como_archivo
+CompiladorIDE.ejecutar_lexico      = ejecutar_lexico
 
 # ─────────────────────────────────────────────────────────────────────────────
 

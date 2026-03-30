@@ -18,6 +18,9 @@ from PySide6.QtCore import Qt, QRect, QSize
 from PySide6.QtWidgets import QTreeView
 from PySide6.QtWidgets import QSplitter
 
+# Resaltador de sintaxis para el editor de código
+from syntax_highlighter import MiHighlighter
+
 class LineNumberArea(QWidget):
     def __init__(self, editor):
         super().__init__(editor)
@@ -252,6 +255,19 @@ class SetupInterfaz:
         fixed_font = QFontDatabase.systemFont(QFontDatabase.FixedFont)
         self.editor.setFont(fixed_font)
 
+        # Aplicar tema oscuro al editor para que el resaltado de sintaxis sea visible
+        self.editor.setStyleSheet("""
+            QPlainTextEdit {
+                background-color: #1e1e1e;
+                color: #d4d4d4;
+                selection-background-color: #264f78;
+                selection-color: #ffffff;
+            }
+        """)
+
+        # Instanciar el resaltador de sintaxis sobre el documento del editor
+        self.highlighter = MiHighlighter(self.editor.document())
+
         self.editor.cursorPositionChanged.connect(self.actualizar_posicion_cursor)
 
         layout_editor.addWidget(self.editor, stretch=6)
@@ -338,12 +354,8 @@ class SetupInterfaz:
         menu_compilar.addSeparator()
         menu_compilar.addAction(self.act_ejecutar)
 
-        menu_compilar.addAction(self.act_lexico)
-        menu_compilar.addAction(self.act_sintactico)
-        menu_compilar.addAction(self.act_semantico)
-        menu_compilar.addAction(self.act_intermedio)
-        menu_compilar.addSeparator()
-        menu_compilar.addAction(self.act_ejecutar)
+        # ── Conectar acciones del compilador ──────────────────────────────────
+        self.act_lexico.triggered.connect(self.ejecutar_lexico)
         
     # ─── Barra de Herramientas ────────────────────────────────────────────────
 
@@ -386,40 +398,83 @@ class SetupInterfaz:
     """
 
     def configurar_paneles_resultados(self):
-        # Crear los componentes para cada pestaña solicitada
-        self.tabla_tokens = QTableWidget(0, 3)
-        self.tabla_tokens.setHorizontalHeaderLabels(["Línea", "Token", "Lexema"])
+        # ── Estilo oscuro compartido para todas las tablas ────────────────
+        estilo_tabla = """
+            QTableWidget {
+                background-color: #1e1e1e;
+                color: #d4d4d4;
+                gridline-color: #3e3e3e;
+                border: none;
+            }
+            QTableWidget::item:selected {
+                background-color: #264f78;
+            }
+            QHeaderView::section {
+                background-color: #2d2d2d;
+                color: #d4d4d4;
+                padding: 4px;
+                border: 1px solid #3e3e3e;
+                font-weight: bold;
+            }
+        """
 
-        # Tabla para la Tabla de Símbolos (Identificadores y sus propiedades)
+        # Estilo oscuro compartido para las áreas de texto
+        estilo_texto = """
+            QTextEdit {
+                background-color: #1e1e1e;
+                color: #d4d4d4;
+                border: none;
+            }
+        """
+
+        # ── Tabla de Tokens ───────────────────────────────────────────────
+        self.tabla_tokens = QTableWidget(0, 4)
+        self.tabla_tokens.setHorizontalHeaderLabels(["Línea", "Columna", "Token", "Lexema"])
+        self.tabla_tokens.setStyleSheet(estilo_tabla)
+        self.tabla_tokens.horizontalHeader().setStretchLastSection(True)
+        self.tabla_tokens.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.tabla_tokens.setSelectionBehavior(QTableWidget.SelectRows)
+        self.tabla_tokens.setAlternatingRowColors(True)
+
+        # ── Tabla de Símbolos ─────────────────────────────────────────────
         self.tabla_simbolos = QTableWidget(0, 4)
         self.tabla_simbolos.setHorizontalHeaderLabels(["ID", "Tipo", "Valor", "Línea"])
+        self.tabla_simbolos.setStyleSheet(estilo_tabla)
+        self.tabla_simbolos.horizontalHeader().setStretchLastSection(True)
+        self.tabla_simbolos.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.tabla_simbolos.setSelectionBehavior(QTableWidget.SelectRows)
+        self.tabla_simbolos.setAlternatingRowColors(True)
 
-        # Tabla para mostrar errores detectados durante cualquier fase
+        # ── Tabla de Errores ──────────────────────────────────────────────
         self.lista_errores = QTableWidget(0, 4)
         self.lista_errores.setHorizontalHeaderLabels(["Tipo", "Línea", "Columna", "Descripción"])
+        self.lista_errores.setStyleSheet(estilo_tabla)
+        self.lista_errores.horizontalHeader().setStretchLastSection(True)
+        self.lista_errores.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.lista_errores.setSelectionBehavior(QTableWidget.SelectRows)
+        self.lista_errores.setAlternatingRowColors(True)
 
-        # 2. Configuración de Áreas de Texto (Para representaciones visuales o salidas de texto)
-        # Panel para el dibujo o representación del Árbol Sintáctico
+        # ── Áreas de Texto ────────────────────────────────────────────────
         self.arbol_sintactico = QTextEdit()
         self.arbol_sintactico.setReadOnly(True)
+        self.arbol_sintactico.setStyleSheet(estilo_texto)
 
-        # Panel para mostrar el resultado de las validaciones semánticas
         self.analisis_semantico = QTextEdit()
         self.analisis_semantico.setReadOnly(True)
+        self.analisis_semantico.setStyleSheet(estilo_texto)
 
-        # Panel para el código de tres direcciones o cuádruplos (Código Intermedio)
         self.codigo_intermedio = QTextEdit()
         self.codigo_intermedio.setReadOnly(True)
+        self.codigo_intermedio.setStyleSheet(estilo_texto)
 
-        # Panel para la consola de salida (Resultado de la ejecución del programa)
         self.consola_ejecucion = QTextEdit()
         self.consola_ejecucion.setReadOnly(True)
+        self.consola_ejecucion.setStyleSheet(estilo_texto)
 
-        # Agregar las pestañas al widget 
-        # (Requerimiento 3)
+        # ── Agregar pestañas ──────────────────────────────────────────────
         self.tabs_resultados.addTab(self.tabla_tokens,      "Tokens")
         self.tabs_resultados.addTab(self.arbol_sintactico,  "Árbol Sintáctico")
-        self.tabs_resultados.addTab(self.analisis_semantico,"Semántica")
+        self.tabs_resultados.addTab(self.analisis_semantico, "Semántica")
         self.tabs_resultados.addTab(self.codigo_intermedio, "Cód. Intermedio")
         self.tabs_resultados.addTab(self.tabla_simbolos,    "Símbolos")
         self.tabs_resultados.addTab(self.lista_errores,     "Errores")
