@@ -9,6 +9,7 @@ Se importan en main.py y se asignan como métodos de la clase.
 import subprocess
 import json
 import os
+from PySide6.QtGui import QColor
 
 from PySide6.QtWidgets import QFileDialog, QMessageBox, QTableWidgetItem
 
@@ -199,8 +200,7 @@ def ejecutar_lexico(self):
     # ── Paso 2: Determinar la ruta del lexer.py ─────────────────────────
     # El compilador vive en la carpeta hermana "compilador"
     ruta_ide = os.path.dirname(os.path.abspath(__file__))
-    ruta_compilador = os.path.join(os.path.dirname(ruta_ide), "compilador")
-    ruta_lexer = os.path.join(ruta_compilador, "lexer.py")
+    ruta_lexer = os.path.join(ruta_ide, "compilador", "lexer.py")
 
     if not os.path.exists(ruta_lexer):
         QMessageBox.critical(
@@ -256,17 +256,52 @@ def ejecutar_lexico(self):
     lista_errores = datos.get("errores", [])
 
     # ── Paso 5: Llenar la tabla de Tokens ────────────────────────────────
-    self.tabla_tokens.setRowCount(0)  # Limpiar filas existentes
+    self.tabla_tokens.setRowCount(0)
+
+    colores_tokens = {
+        "PALABRA_RESERVADA": QColor("#ff6b6b"),   # rojo suave
+        "IDENTIFICADOR": QColor("#d4d4d4"),       # blanco/gris claro
+        "NUMERO_ENTERO": QColor("#b5cea8"),       # verde claro
+        "NUMERO_REAL": QColor("#b5cea8"),         # verde claro
+        "CADENA": QColor("#ce9178"),              # naranja
+        "CARACTER": QColor("#ce9178"),            # naranja
+        "OP_ARITMETICO": QColor("#d7ba7d"),       # amarillo
+        "OP_RELACIONAL": QColor("#4fc1ff"),       # azul claro
+        "OP_LOGICO": QColor("#c586c0"),           # morado
+        "ASIGNACION": QColor("#ffd700"),          # dorado
+        "PARENTESIS_IZQ": QColor("#f5f5f5"),
+        "PARENTESIS_DER": QColor("#f5f5f5"),
+        "LLAVE_IZQ": QColor("#f5f5f5"),
+        "LLAVE_DER": QColor("#f5f5f5"),
+        "COMA": QColor("#f5f5f5"),
+        "PUNTO_Y_COMA": QColor("#f5f5f5"),
+        "DOS_PUNTOS": QColor("#f5f5f5"),
+        "INSERCION": QColor("#4ec9b0"),
+        "EXTRACCION": QColor("#4ec9b0"),
+    }
 
     for token in lista_tokens:
         fila = self.tabla_tokens.rowCount()
         self.tabla_tokens.insertRow(fila)
-        self.tabla_tokens.setItem(fila, 0, QTableWidgetItem(str(token.get("linea", ""))))
-        self.tabla_tokens.setItem(fila, 1, QTableWidgetItem(str(token.get("columna", ""))))
-        self.tabla_tokens.setItem(fila, 2, QTableWidgetItem(token.get("tipo", "")))
-        self.tabla_tokens.setItem(fila, 3, QTableWidgetItem(token.get("lexema", "")))
 
-    # Ajustar ancho de columnas al contenido
+        tipo_token = token.get("tipo", "")
+        color = colores_tokens.get(tipo_token, QColor("#f5f5f5"))
+
+        item_linea = QTableWidgetItem(str(token.get("linea", "")))
+        item_columna = QTableWidgetItem(str(token.get("columna", "")))
+        item_tipo = QTableWidgetItem(tipo_token)
+        item_lexema = QTableWidgetItem(token.get("lexema", ""))
+
+        item_linea.setForeground(color)
+        item_columna.setForeground(color)
+        item_tipo.setForeground(color)
+        item_lexema.setForeground(color)
+
+        self.tabla_tokens.setItem(fila, 0, item_linea)
+        self.tabla_tokens.setItem(fila, 1, item_columna)
+        self.tabla_tokens.setItem(fila, 2, item_tipo)
+        self.tabla_tokens.setItem(fila, 3, item_lexema)
+
     self.tabla_tokens.resizeColumnsToContents()
 
     # ── Paso 6: Llenar la tabla de Errores ───────────────────────────────

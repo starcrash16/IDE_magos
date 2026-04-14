@@ -17,6 +17,7 @@ from PySide6.QtGui import QAction, QPainter, QTextFormat, QFontDatabase
 from PySide6.QtCore import Qt, QRect, QSize
 from PySide6.QtWidgets import QTreeView
 from PySide6.QtWidgets import QSplitter
+from PySide6.QtGui import QColor
 
 # Resaltador de sintaxis para el editor de código
 from syntax_highlighter import MiHighlighter
@@ -102,7 +103,7 @@ class CodeEditor(QPlainTextEdit):
 
         if not self.isReadOnly():
             selection = QTextEdit.ExtraSelection()
-            selection.format.setBackground(self.palette().alternateBase())
+            selection.format.setBackground(QColor(255, 255, 255, 40))
             selection.format.setProperty(QTextFormat.FullWidthSelection, True)
 
             selection.cursor = self.textCursor()
@@ -402,16 +403,21 @@ class SetupInterfaz:
         estilo_tabla = """
             QTableWidget {
                 background-color: #1e1e1e;
-                color: #d4d4d4;
-                gridline-color: #3e3e3e;
-                border: none;
+                color: #f5f5f5;
+                gridline-color: #555555;
+                border: 1px solid #3e3e3e;
+                alternate-background-color: #252526;
+            }
+            QTableWidget::item {
+                padding: 4px;
             }
             QTableWidget::item:selected {
                 background-color: #264f78;
+                color: #ffffff;
             }
             QHeaderView::section {
                 background-color: #2d2d2d;
-                color: #d4d4d4;
+                color: #ffffff;
                 padding: 4px;
                 border: 1px solid #3e3e3e;
                 font-weight: bold;
