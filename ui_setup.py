@@ -410,7 +410,7 @@ class SetupInterfaz:
             }
             QTableWidget::item {
                 padding: 4px;
-            }
+            }git 
             QTableWidget::item:selected {
                 background-color: #264f78;
                 color: #ffffff;
