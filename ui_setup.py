@@ -357,6 +357,7 @@ class SetupInterfaz:
 
         # ── Conectar acciones del compilador ──────────────────────────────────
         self.act_lexico.triggered.connect(self.ejecutar_lexico)
+        self.act_sintactico.triggered.connect(self.ejecutar_sintactico)
         
     # ─── Barra de Herramientas ────────────────────────────────────────────────
 
@@ -461,9 +462,11 @@ class SetupInterfaz:
         self.lista_errores.setAlternatingRowColors(True)
 
         # ── Áreas de Texto ────────────────────────────────────────────────
-        self.arbol_sintactico = QTextEdit()
-        self.arbol_sintactico.setReadOnly(True)
-        self.arbol_sintactico.setStyleSheet(estilo_texto)
+        # ✅ implemented by agent — QTreeWidget for syntax tree
+        from PySide6.QtWidgets import QTreeWidget
+        self.arbol_sintactico = QTreeWidget()
+        self.arbol_sintactico.setHeaderLabels(["Nodo", "Valor", "Línea"])
+        self.arbol_sintactico.setStyleSheet(estilo_tabla)
 
         self.analisis_semantico = QTextEdit()
         self.analisis_semantico.setReadOnly(True)

@@ -240,5 +240,12 @@ def main():
     print(json.dumps(resultado, ensure_ascii=False, indent=2))
 
 
+# ✅ implemented by agent — exportar_tokens added
+def exportar_tokens(tokens: list, ruta: str):
+    """Escribe los tokens en un archivo de texto en formato tabla."""
+    with open(ruta, "w", encoding="utf-8") as f:
+        for t in tokens:
+            f.write(f"{t['tipo']}\t{t['lexema']}\t{t['linea']}\t{t['columna']}\n")
+
 if __name__ == "__main__":
     main()

@@ -1,0 +1,161 @@
+Created by PLY version 3.11 (http://www.dabeaz.com/ply)
+
+Unused terminals:
+
+    CARACTER
+    DOS_PUNTOS
+    OP_ARITMETICO
+    OP_LOGICO
+    OP_RELACIONAL
+    PALABRA_RESERVADA
+
+Grammar
+
+Rule 0     S' -> programa
+Rule 1     programa -> MAIN LLAVE_IZQ lista_declaracion LLAVE_DER
+Rule 2     lista_declaracion -> lista_declaracion declaracion
+Rule 3     lista_declaracion -> declaracion
+Rule 4     declaracion -> declaracion_variable
+Rule 5     declaracion -> lista_sentencias
+Rule 6     declaracion_variable -> tipo identificador PUNTO_Y_COMA
+Rule 7     identificador -> IDENTIFICADOR
+Rule 8     identificador -> identificador COMA IDENTIFICADOR
+Rule 9     tipo -> INT
+Rule 10    tipo -> FLOAT
+Rule 11    tipo -> BOOL
+Rule 12    lista_sentencias -> lista_sentencias sentencia
+Rule 13    lista_sentencias -> <empty>
+Rule 14    sentencia -> seleccion
+Rule 15    sentencia -> iteracion
+Rule 16    sentencia -> repeticion
+Rule 17    sentencia -> sent_in
+Rule 18    sentencia -> sent_out
+Rule 19    sentencia -> asignacion
+Rule 20    asignacion -> IDENTIFICADOR ASIGNACION sent_expresion
+Rule 21    sent_expresion -> expresion PUNTO_Y_COMA
+Rule 22    sent_expresion -> PUNTO_Y_COMA
+Rule 23    seleccion -> IF expresion THEN lista_sentencias END
+Rule 24    seleccion -> IF expresion THEN lista_sentencias ELSE lista_sentencias END
+Rule 25    iteracion -> WHILE expresion lista_sentencias END
+Rule 26    repeticion -> DO lista_sentencias WHILE expresion
+Rule 27    sent_in -> CIN EXTRACCION IDENTIFICADOR PUNTO_Y_COMA
+Rule 28    sent_out -> COUT INSERCION salida
+Rule 29    salida -> CADENA
+Rule 30    salida -> expresion
+Rule 31    salida -> CADENA INSERCION expresion
+Rule 32    salida -> expresion INSERCION CADENA
+Rule 33    expresion -> expresion_simple
+Rule 34    expresion -> expresion_simple rel_op expresion_simple
+Rule 35    rel_op -> MENOR
+Rule 36    rel_op -> MENOR_IGUAL
+Rule 37    rel_op -> MAYOR
+Rule 38    rel_op -> MAYOR_IGUAL
+Rule 39    rel_op -> IGUAL_IGUAL
+Rule 40    rel_op -> DIFERENTE
+Rule 41    expresion_simple -> expresion_simple suma_op termino
+Rule 42    expresion_simple -> termino
+Rule 43    suma_op -> MAS
+Rule 44    suma_op -> MENOS
+Rule 45    suma_op -> MAS_MAS
+Rule 46    suma_op -> MENOS_MENOS
+Rule 47    termino -> termino mult_op factor
+Rule 48    termino -> factor
+Rule 49    mult_op -> POR
+Rule 50    mult_op -> ENTRE
+Rule 51    mult_op -> MODULO
+Rule 52    factor -> factor pot_op componente
+Rule 53    factor -> componente
+Rule 54    pot_op -> POTENCIA
+Rule 55    numero -> NUMERO_ENTERO
+Rule 56    numero -> NUMERO_REAL
+Rule 57    componente -> PARENTESIS_IZQ expresion PARENTESIS_DER
+Rule 58    componente -> numero
+Rule 59    componente -> IDENTIFICADOR
+Rule 60    componente -> BOOL
+Rule 61    componente -> op_logico componente
+Rule 62    op_logico -> AND
+Rule 63    op_logico -> OR
+Rule 64    op_logico -> NOT
+
+Terminals, with rules where they appear
+
+AND                  : 62
+ASIGNACION           : 20
+BOOL                 : 11 60
+CADENA               : 29 31 32
+CARACTER             : 
+CIN                  : 27
+COMA                 : 8
+COUT                 : 28
+DIFERENTE            : 40
+DO                   : 26
+DOS_PUNTOS           : 
+ELSE                 : 24
+END                  : 23 24 25
+ENTRE                : 50
+EXTRACCION           : 27
+FLOAT                : 10
+IDENTIFICADOR        : 7 8 20 27 59
+IF                   : 23 24
+IGUAL_IGUAL          : 39
+INSERCION            : 28 31 32
+INT                  : 9
+LLAVE_DER            : 1
+LLAVE_IZQ            : 1
+MAIN                 : 1
+MAS                  : 43
+MAS_MAS              : 45
+MAYOR                : 37
+MAYOR_IGUAL          : 38
+MENOR                : 35
+MENOR_IGUAL          : 36
+MENOS                : 44
+MENOS_MENOS          : 46
+MODULO               : 51
+NOT                  : 64
+NUMERO_ENTERO        : 55
+NUMERO_REAL          : 56
+OP_ARITMETICO        : 
+OP_LOGICO            : 
+OP_RELACIONAL        : 
+OR                   : 63
+PALABRA_RESERVADA    : 
+PARENTESIS_DER       : 57
+PARENTESIS_IZQ       : 57
+POR                  : 49
+POTENCIA             : 54
+PUNTO_Y_COMA         : 6 21 22 27
+THEN                 : 23 24
+WHILE                : 25 26
+error                : 
+
+Nonterminals, with rules where they appear
+
+asignacion           : 19
+componente           : 52 53 61
+declaracion          : 2 3
+declaracion_variable : 4
+expresion            : 21 23 24 25 26 30 31 32 57
+expresion_simple     : 33 34 34 41
+factor               : 47 48 52
+identificador        : 6 8
+iteracion            : 15
+lista_declaracion    : 1 2
+lista_sentencias     : 5 12 23 24 24 25 26
+mult_op              : 47
+numero               : 58
+op_logico            : 61
+pot_op               : 52
+programa             : 0
+rel_op               : 34
+repeticion           : 16
+salida               : 28
+seleccion            : 14
+sent_expresion       : 20
+sent_in              : 17
+sent_out             : 18
+sentencia            : 12
+suma_op              : 41
+termino              : 41 42 47
+tipo                 : 6
+

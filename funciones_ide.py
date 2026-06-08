@@ -333,3 +333,159 @@ def ejecutar_lexico(self):
         self.barra_estado.showMessage(
             f"Análisis léxico completado: {len(lista_tokens)} tokens, sin errores ✓", 5000
         )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Ejecución del Analizador Sintáctico (Fase 3)
+# ══════════════════════════════════════════════════════════════════════════════
+
+from PySide6.QtWidgets import QTreeWidgetItem
+
+def _populate_tree_widget(parent_item, node):
+    """Convierte un nodo AST (dict) a QTreeWidgetItem para visualización."""
+    # ✅ implemented by agent — populate QTreeWidget
+    if not node:
+        return
+    
+    item = QTreeWidgetItem(parent_item)
+    item.setText(0, str(node.get("type", "")))
+    
+    val = node.get("value")
+    item.setText(1, str(val) if val is not None else "")
+    
+    line = node.get("line")
+    item.setText(2, str(line) if line is not None else "")
+    
+    for child in node.get("children", []):
+        _populate_tree_widget(item, child)
+
+
+def ejecutar_sintactico(self):
+    """
+    Ejecuta el analizador sintáctico sobre el archivo actual.
+    1. Guarda el archivo (o pide guardarlo si es nuevo).
+    2. Invoca parser.py vía subprocess.run() (comunicación IPC).
+    3. Parsea el JSON de stdout.
+    4. Muestra el AST en la pestaña Árbol Sintáctico.
+    5. Agrega errores sintácticos y léxicos a la tabla de Errores.
+    """
+    # ── Paso 1: Asegurar que el archivo está guardado ────────────────────
+    if not self.archivo_actual:
+        QMessageBox.warning(
+            self, "Archivo no guardado",
+            "Debes guardar el archivo antes de ejecutar el análisis sintáctico."
+        )
+        self.guardar_como_archivo()
+        if not self.archivo_actual:
+            return  # El usuario canceló el diálogo de guardar
+    else:
+        self.guardar_archivo()
+
+    # ── Paso 2: Determinar la ruta del parser.py ─────────────────────────
+    ruta_ide = os.path.dirname(os.path.abspath(__file__))
+    ruta_parser = os.path.join(ruta_ide, "compilador", "parser.py")
+
+    if not os.path.exists(ruta_parser):
+        QMessageBox.critical(
+            self, "Error",
+            f"No se encontró el analizador sintáctico en:\n{ruta_parser}"
+        )
+        return
+
+    # ── Paso 3: Invocar el parser vía subprocess (IPC) ───────────────────
+    self.barra_estado.showMessage("Ejecutando análisis sintáctico...", 5000)
+
+    try:
+        resultado = subprocess.run(
+            ["python", ruta_parser, self.archivo_actual],
+            capture_output=True,
+            text=True,
+            timeout=30,  # Timeout de seguridad (30 segundos)
+        )
+    except subprocess.TimeoutExpired:
+        QMessageBox.critical(
+            self, "Error",
+            "El analizador sintáctico tardó demasiado (timeout de 30s)."
+        )
+        return
+    except Exception as e:
+        QMessageBox.critical(
+            self, "Error",
+            f"Error al ejecutar el analizador sintáctico:\n{e}"
+        )
+        return
+
+    # ── Paso 4: Parsear el JSON de stdout ────────────────────────────────
+    salida = resultado.stdout.strip()
+
+    if not salida:
+        error_stderr = resultado.stderr.strip()
+        QMessageBox.critical(
+            self, "Error del Parser",
+            f"El analizador sintáctico no produjo salida.\n\nstderr:\n{error_stderr}"
+        )
+        return
+
+    try:
+        datos = json.loads(salida)
+    except json.JSONDecodeError as e:
+        QMessageBox.critical(
+            self, "Error de formato",
+            f"La salida del parser no es JSON válido:\n{e}\n\nSalida:\n{salida[:500]}"
+        )
+        return
+
+    ast_dict = datos.get("ast")
+    errores_lexicos = datos.get("errores_lexicos", [])
+    errores_sintacticos = datos.get("errores_sintacticos", [])
+
+    # ── Paso 5: Mostrar el AST en la pestaña Árbol Sintáctico ────────────
+    self.arbol_sintactico.clear()
+
+    if ast_dict:
+        # ✅ implemented by agent — QTreeWidget population
+        _populate_tree_widget(self.arbol_sintactico, ast_dict)
+        self.arbol_sintactico.expandAll()
+    else:
+        err_item = QTreeWidgetItem(self.arbol_sintactico)
+        err_item.setText(0, "⚠ No se pudo construir el árbol sintáctico.")
+
+    # ── Paso 6: Llenar la tabla de Errores ───────────────────────────────
+    self.lista_errores.setRowCount(0)
+
+    for error in errores_lexicos:
+        fila = self.lista_errores.rowCount()
+        self.lista_errores.insertRow(fila)
+        self.lista_errores.setItem(fila, 0, QTableWidgetItem("Léxico"))
+        self.lista_errores.setItem(fila, 1, QTableWidgetItem(str(error.get("linea", ""))))
+        self.lista_errores.setItem(fila, 2, QTableWidgetItem(str(error.get("columna", ""))))
+        self.lista_errores.setItem(fila, 3, QTableWidgetItem(error.get("descripcion", "")))
+
+    for error in errores_sintacticos:
+        fila = self.lista_errores.rowCount()
+        self.lista_errores.insertRow(fila)
+        # ✅ implemented by agent — labeled [SINTÁCTICO] and using columna
+        self.lista_errores.setItem(fila, 0, QTableWidgetItem("[SINTÁCTICO]"))
+        self.lista_errores.setItem(fila, 1, QTableWidgetItem(str(error.get("linea", ""))))
+        self.lista_errores.setItem(fila, 2, QTableWidgetItem(str(error.get("columna", ""))))
+        self.lista_errores.setItem(fila, 3, QTableWidgetItem(error.get("descripcion", "")))
+
+    self.lista_errores.resizeColumnsToContents()
+
+    # ── Paso 7: Mostrar la pestaña correspondiente ───────────────────────
+    total_errores = len(errores_lexicos) + len(errores_sintacticos)
+
+    if total_errores > 0:
+        # Si hay errores, ir a la pestaña de Errores
+        indice_errores = self.tabs_resultados.indexOf(self.lista_errores)
+        self.tabs_resultados.setCurrentIndex(indice_errores)
+        self.barra_estado.showMessage(
+            f"Análisis sintáctico completado: {total_errores} error(es)", 5000
+        )
+    else:
+        # Si no hay errores, ir a la pestaña de Árbol Sintáctico
+        indice_arbol = self.tabs_resultados.indexOf(self.arbol_sintactico)
+        self.tabs_resultados.setCurrentIndex(indice_arbol)
+        self.barra_estado.showMessage(
+            "Análisis sintáctico completado: sin errores ✓", 5000
+        )

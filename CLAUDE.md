@@ -24,14 +24,15 @@ This is a graphical compiler IDE built with Python + PySide6, developed phase-by
 ```
 main.py                  ← Entry point; defines CompiladorIDE class
 ui_setup.py              ← SetupInterfaz mixin: all widget construction
-funciones_ide.py         ← File I/O methods + ejecutar_lexico() (injected into the class)
+funciones_ide.py         ← File I/O methods + ejecutar_lexico() + ejecutar_sintactico() (injected into the class)
 syntax_highlighter.py    ← MiHighlighter (QSyntaxHighlighter): real-time coloring
 compilador/lexer.py      ← Standalone lexer; communicates with IDE via subprocess + JSON stdout
+compilador/parser.py     ← Standalone parser (PLY); calls lexer internally, outputs AST + errors as JSON
 ```
 
 ### Key design decisions
 
-**IPC via subprocess:** `ejecutar_lexico()` in `funciones_ide.py` invokes `compilador/lexer.py` as a child process and parses its JSON stdout. Each future compiler phase (parser, semantic, etc.) should follow the same pattern: a standalone script in `compilador/` that reads a file and writes JSON to stdout.
+**IPC via subprocess:** `ejecutar_lexico()` and `ejecutar_sintactico()` in `funciones_ide.py` invoke `compilador/lexer.py` and `compilador/parser.py` respectively as child processes and parse their JSON stdout. Each future compiler phase (semantic, etc.) should follow the same pattern: a standalone script in `compilador/` that reads a file and writes JSON to stdout.
 
 **Mixin injection pattern:** `SetupInterfaz` (in `ui_setup.py`) is a plain class with no Qt inheritance — it relies on `self` being a `QMainWindow`. File functions in `funciones_ide.py` are module-level functions that also use `self` and are assigned directly to `CompiladorIDE` as class attributes in `main.py`.
 
@@ -51,7 +52,7 @@ compilador/lexer.py      ← Standalone lexer; communicates with IDE via subproc
 |-------|--------|
 | UI base + file management | Complete |
 | Lexical analysis (`compilador/lexer.py`) | Complete |
-| Syntax analysis | Placeholder (menu action exists, no implementation) |
+| Syntax analysis (`compilador/parser.py`) | ✅ Complete |
 | Semantic analysis | Placeholder |
 | Intermediate code generation | Placeholder |
 | Execution | Placeholder |

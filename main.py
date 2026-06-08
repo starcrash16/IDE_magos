@@ -13,6 +13,7 @@ from funciones_ide import (
     guardar_archivo,
     guardar_como_archivo,
     ejecutar_lexico,
+    ejecutar_sintactico,
 )
 
 class CompiladorIDE(SetupInterfaz, QMainWindow):
@@ -37,6 +38,7 @@ CompiladorIDE.abrir_archivo        = abrir_archivo
 CompiladorIDE.guardar_archivo      = guardar_archivo
 CompiladorIDE.guardar_como_archivo = guardar_como_archivo
 CompiladorIDE.ejecutar_lexico      = ejecutar_lexico
+CompiladorIDE.ejecutar_sintactico  = ejecutar_sintactico
 
 # ─────────────────────────────────────────────────────────────────────────────
 
