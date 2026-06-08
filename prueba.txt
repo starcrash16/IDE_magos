@@ -1,5 +1,1 @@
-main {
-    int x;
-    x = 10;
-    cout << "Valor: " << x
-}
+main { int total = 50; }

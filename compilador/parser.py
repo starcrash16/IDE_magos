@@ -1,3 +1,14 @@
+# DIAGNOSIS
+# Error 1:
+# 1. What does p_declaracion_variable currently accept as identifier? → IDENTIFICADOR (the terminal)
+# 2. What does p_identificador_multi produce?                        → An ASTNode ("ID_MULTI") via the 'identificador' non-terminal
+# 3. Why does 'int x, y, z;' fail?                                   → Because p_declaracion_variable expects a single IDENTIFICADOR, rejecting the comma-separated list that 'identificador' would successfully match.
+#
+# Error 2:
+# 4. Does p_sent_out consume PUNTO_Y_COMA?                           → No
+# 5. Does p_sent_in consume PUNTO_Y_COMA?                            → Yes
+# 6. Why does 'cout << "texto";' fail?                               → The parser encounters the PUNTO_Y_COMA (;) but p_sent_out doesn't expect it, resulting in a syntax error.
+
 """
 BNF GRAMMAR
 programa          -> main { lista_declaracion }
@@ -6,6 +17,7 @@ lista_declaracion -> lista_declaracion declaracion
 declaracion       -> declaracion_variable
                    | lista_sentencias
 declaracion_variable -> tipo identificador ;
+                   | tipo id = expresion ;
 identificador     -> id
                    | identificador , id
 tipo              -> int | float | bool
@@ -25,13 +37,15 @@ seleccion         -> if expresion then lista_sentencias end
 iteracion         -> while expresion lista_sentencias end
 repeticion        -> do lista_sentencias while expresion
 sent_in           -> cin >> id ;
-sent_out          -> cout << salida
+sent_out          -> cout << salida ;
 salida            -> cadena
                    | expresion
                    | cadena << expresion
                    | expresion << cadena
 expresion         -> expresion_simple
                    | expresion_simple rel_op expresion_simple
+                   | expresion && expresion
+                   | expresion || expresion
 rel_op            -> < | <= | > | >= | == | !=
 expresion_simple  -> expresion_simple suma_op termino
                    | termino
@@ -199,7 +213,24 @@ def p_declaracion_sent(p):
 
 def p_declaracion_variable(p):
     """declaracion_variable : tipo identificador PUNTO_Y_COMA"""
-    p[0] = ASTNode("DECLARACION_VARIABLE", [p[1], p[2]], line=p[1].line)
+    p[0] = ASTNode(
+        "DECLARACION_VARIABLE",
+        [p[1], p[2]],
+        line=p[1].line,
+    )
+
+def p_declaracion_variable_asignacion(p):
+    """declaracion_variable : tipo IDENTIFICADOR ASIGNACION expresion PUNTO_Y_COMA"""
+    p[0] = ASTNode(
+        "DECLARACION_VARIABLE",
+        [
+            p[1],
+            ASTNode("ID", value=p[2], line=p.lineno(2)),
+            p[4],
+        ],
+        value="=",
+        line=p[1].line,
+    )
 
 def p_identificador_single(p):
     """identificador : IDENTIFICADOR"""
@@ -235,40 +266,51 @@ def p_sentencia(p):
                  | asignacion"""
     p[0] = p[1]
 
+# PUNTO_Y_COMA present (via sent_expresion)
+# identifier form correct (terminal)
 def p_asignacion(p):
     """asignacion : IDENTIFICADOR ASIGNACION sent_expresion"""
     p[0] = ASTNode("ASIGNACION", [ASTNode("ID", value=p[1], line=p.lineno(1)), p[3]], line=p.lineno(1))
 
+# PUNTO_Y_COMA present
 def p_sent_expresion_full(p):
     """sent_expresion : expresion PUNTO_Y_COMA"""
     p[0] = ASTNode("SENT_EXPRESION", [p[1]], line=p[1].line)
 
+# PUNTO_Y_COMA present
 def p_sent_expresion_empty(p):
     """sent_expresion : PUNTO_Y_COMA"""
     p[0] = ASTNode("SENT_EXPRESION", line=p.lineno(1))
 
+# block terminators correct
 def p_seleccion_if(p):
     """seleccion : IF expresion THEN lista_sentencias END"""
     p[0] = ASTNode("SELECCION", [p[2], p[4]], line=p.lineno(1))
 
+# block terminators correct
 def p_seleccion_if_else(p):
     """seleccion : IF expresion THEN lista_sentencias ELSE lista_sentencias END"""
     p[0] = ASTNode("SELECCION", [p[2], p[4], p[6]], line=p.lineno(1))
 
+# block terminators correct
 def p_iteracion(p):
     """iteracion : WHILE expresion lista_sentencias END"""
     p[0] = ASTNode("ITERACION", [p[2], p[3]], line=p.lineno(1))
 
+# block terminators correct
 def p_repeticion(p):
     """repeticion : DO lista_sentencias WHILE expresion"""
     p[0] = ASTNode("REPETICION", [p[2], p[4]], line=p.lineno(1))
 
+# PUNTO_Y_COMA present
+# identifier form correct (terminal)
 def p_sent_in(p):
     """sent_in : CIN EXTRACCION IDENTIFICADOR PUNTO_Y_COMA"""
     p[0] = ASTNode("SENT_IN", [ASTNode("ID", value=p[3], line=p.lineno(3))], line=p.lineno(1))
 
+# PUNTO_Y_COMA present
 def p_sent_out(p):
-    """sent_out : COUT INSERCION salida"""
+    """sent_out : COUT INSERCION salida PUNTO_Y_COMA"""
     p[0] = ASTNode("SENT_OUT", [p[3]], line=p.lineno(1))
 
 def p_salida_cadena(p):
@@ -294,6 +336,11 @@ def p_expresion_simple_only(p):
 def p_expresion_rel(p):
     """expresion : expresion_simple rel_op expresion_simple"""
     p[0] = ASTNode("EXPRESION_RELACIONAL", [p[1], p[2], p[3]], line=p[1].line)
+
+def p_expresion_logica(p):
+    """expresion : expresion AND expresion
+                 | expresion OR expresion"""
+    p[0] = ASTNode("EXPRESION_LOGICA", [p[1], p[3]], value=p[2], line=p[1].line)
 
 def p_rel_op(p):
     """rel_op : MENOR

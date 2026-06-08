@@ -1,0 +1,8 @@
+main {
+int x = 5;
+if x > 0 then
+cout << "positivo"
+else
+cout << "negativo"
+end
+}

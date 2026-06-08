@@ -1,0 +1,5 @@
+main {
+int a;
+float b = 2.5;
+int c = 10;
+}

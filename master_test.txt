@@ -1,0 +1,54 @@
+main {
+int a;
+int b = 10;
+float c = 3.1416;
+bool d = true;
+int x, y, z;
+a = 5;
+b = a + 2;
+c = c * 2.0;
+
+if a > 0 then
+    cout << "a es positivo";
+end
+
+if b >= 10 then
+    cout << "b es mayor o igual a 10";
+else
+    cout << "b es menor a 10";
+end
+
+if a == 5 && b != 0 then
+    cout << "condicion logica verdadera";
+end
+
+while a < 10
+    a = a + 1;
+end
+
+do
+    b = b - 1;
+while b > 0
+
+int i = 0;
+while i < 5
+    i = i + 1;
+end
+
+int resultado = 2 + 3 * 4;
+float potencia = 2 ^ 8;
+int modulo = 10 % 3;
+
+int edad;
+cin >> edad;
+cout << edad;
+
+cout << "valor de a: " << a;
+cout << a << " es el resultado";
+
+if a != 0 || b == 0 then
+    cout << "al menos una condicion se cumple";
+end
+
+int neg = (a + b) * (c - 1.0);
+}
