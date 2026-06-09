@@ -340,22 +340,32 @@ def ejecutar_lexico(self):
 # ══════════════════════════════════════════════════════════════════════════════
 
 from PySide6.QtWidgets import QTreeWidgetItem
+from PySide6.QtGui import QFont
+from arbol_grafico import color_para
 
 def _populate_tree_widget(parent_item, node):
-    """Convierte un nodo AST (dict) a QTreeWidgetItem para visualización."""
-    # ✅ implemented by agent — populate QTreeWidget
+    """Convierte un nodo AST (dict) a QTreeWidgetItem coloreado (una columna)."""
     if not node:
         return
-    
+
+    tipo = str(node.get("type", ""))
+    valor = node.get("value")
+    linea = node.get("line")
+
+    # Etiqueta: TIPO  valor  · L#   (todo en una sola columna, como la referencia)
+    etiqueta = tipo
+    if valor is not None:
+        etiqueta += f"  {valor}"
+    if linea:
+        etiqueta += f"   · L{linea}"
+
     item = QTreeWidgetItem(parent_item)
-    item.setText(0, str(node.get("type", "")))
-    
-    val = node.get("value")
-    item.setText(1, str(val) if val is not None else "")
-    
-    line = node.get("line")
-    item.setText(2, str(line) if line is not None else "")
-    
+    item.setText(0, etiqueta)
+
+    # Color del texto según el tipo de nodo
+    _bg, fg = color_para(tipo)
+    item.setForeground(0, QColor(fg))
+
     for child in node.get("children", []):
         _populate_tree_widget(item, child)
 
@@ -440,15 +450,19 @@ def ejecutar_sintactico(self):
     errores_sintacticos = datos.get("errores_sintacticos", [])
 
     # ── Paso 5: Mostrar el AST en la pestaña Árbol Sintáctico ────────────
+    # 5a. Árbol lista (QTreeWidget coloreado)
     self.arbol_sintactico.clear()
 
     if ast_dict:
-        # ✅ implemented by agent — QTreeWidget population
         _populate_tree_widget(self.arbol_sintactico, ast_dict)
         self.arbol_sintactico.expandAll()
     else:
         err_item = QTreeWidgetItem(self.arbol_sintactico)
         err_item.setText(0, "⚠ No se pudo construir el árbol sintáctico.")
+        err_item.setForeground(0, QColor("#ff6b6b"))
+
+    # 5b. Árbol gráfico (cajas con zoom)
+    self.arbol_grafico.dibujar(ast_dict)
 
     # ── Paso 6: Llenar la tabla de Errores ───────────────────────────────
     self.lista_errores.setRowCount(0)
@@ -484,7 +498,7 @@ def ejecutar_sintactico(self):
         )
     else:
         # Si no hay errores, ir a la pestaña de Árbol Sintáctico
-        indice_arbol = self.tabs_resultados.indexOf(self.arbol_sintactico)
+        indice_arbol = self.tabs_resultados.indexOf(self.tab_arbol)
         self.tabs_resultados.setCurrentIndex(indice_arbol)
         self.barra_estado.showMessage(
             "Análisis sintáctico completado: sin errores ✓", 5000

@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QTabWidget, QTableWidget, QToolBar,
     QStatusBar, QStyle, QLabel,
     QPlainTextEdit, QTextEdit,
-    QTreeView
+    QTreeView, QPushButton
 )
 
 from PySide6.QtWidgets import QFileSystemModel
@@ -461,12 +461,8 @@ class SetupInterfaz:
         self.lista_errores.setSelectionBehavior(QTableWidget.SelectRows)
         self.lista_errores.setAlternatingRowColors(True)
 
-        # ── Áreas de Texto ────────────────────────────────────────────────
-        # ✅ implemented by agent — QTreeWidget for syntax tree
-        from PySide6.QtWidgets import QTreeWidget
-        self.arbol_sintactico = QTreeWidget()
-        self.arbol_sintactico.setHeaderLabels(["Nodo", "Valor", "Línea"])
-        self.arbol_sintactico.setStyleSheet(estilo_tabla)
+        # ── Árbol Sintáctico (gráfico + lista) ────────────────────────────
+        self.tab_arbol = self.crear_panel_arbol()
 
         self.analisis_semantico = QTextEdit()
         self.analisis_semantico.setReadOnly(True)
@@ -482,12 +478,111 @@ class SetupInterfaz:
 
         # ── Agregar pestañas ──────────────────────────────────────────────
         self.tabs_resultados.addTab(self.tabla_tokens,      "Tokens")
-        self.tabs_resultados.addTab(self.arbol_sintactico,  "Árbol Sintáctico")
+        self.tabs_resultados.addTab(self.tab_arbol,         "Árbol Sintáctico")
         self.tabs_resultados.addTab(self.analisis_semantico, "Semántica")
         self.tabs_resultados.addTab(self.codigo_intermedio, "Cód. Intermedio")
         self.tabs_resultados.addTab(self.tabla_simbolos,    "Símbolos")
         self.tabs_resultados.addTab(self.lista_errores,     "Errores")
         self.tabs_resultados.addTab(self.consola_ejecucion, "Ejecución")
+
+    # ─── Panel del Árbol Sintáctico (gráfico + lista) ─────────────────────────
+
+    def crear_panel_arbol(self):
+        """
+        Construye la pestaña "Árbol Sintáctico":
+        un splitter con la vista GRÁFICA (cajas con zoom) a la izquierda
+        y el ÁRBOL LISTA coloreado y colapsable a la derecha.
+
+        Deja como atributos:
+            self.arbol_grafico    -> ArbolGraficoView
+            self.arbol_sintactico -> QTreeWidget  (usado por ejecutar_sintactico)
+        """
+        from PySide6.QtWidgets import QTreeWidget
+        from arbol_grafico import ArbolGraficoView
+
+        contenedor = QWidget()
+        layout = QVBoxLayout(contenedor)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        splitter = QSplitter(Qt.Horizontal)
+        layout.addWidget(splitter)
+
+        # ── Lado izquierdo: vista gráfica + barra de zoom ─────────────────
+        lado_grafico = QWidget()
+        lay_grafico = QVBoxLayout(lado_grafico)
+        lay_grafico.setContentsMargins(0, 0, 0, 0)
+        lay_grafico.setSpacing(0)
+
+        barra_zoom = QWidget()
+        barra_zoom.setStyleSheet("background-color: #2d2d2d;")
+        lay_zoom = QHBoxLayout(barra_zoom)
+        lay_zoom.setContentsMargins(8, 4, 8, 4)
+
+        lbl_titulo = QLabel("ÁRBOL VISUAL")
+        lbl_titulo.setStyleSheet("color: #4fc1ff; font-weight: bold;")
+        lay_zoom.addWidget(lbl_titulo)
+
+        lbl_ayuda = QLabel("Ctrl+Rueda = zoom · Arrastra = mover")
+        lbl_ayuda.setStyleSheet("color: #858585; font-size: 11px;")
+        lay_zoom.addWidget(lbl_ayuda)
+        lay_zoom.addStretch()
+
+        self.arbol_grafico = ArbolGraficoView()
+
+        estilo_btn = """
+            QPushButton {
+                background-color: #3e3e3e;
+                color: #f5f5f5;
+                border: none;
+                border-radius: 4px;
+                padding: 2px 10px;
+                font-weight: bold;
+            }
+            QPushButton:hover { background-color: #264f78; color: #ffffff; }
+        """
+        btn_menos = QPushButton("−")
+        btn_reset = QPushButton("1:1")
+        btn_mas = QPushButton("+")
+        for b in (btn_menos, btn_reset, btn_mas):
+            b.setStyleSheet(estilo_btn)
+            b.setCursor(Qt.PointingHandCursor)
+            lay_zoom.addWidget(b)
+
+        btn_menos.clicked.connect(self.arbol_grafico.zoom_out)
+        btn_reset.clicked.connect(self.arbol_grafico.zoom_reset)
+        btn_mas.clicked.connect(self.arbol_grafico.zoom_in)
+
+        lay_grafico.addWidget(barra_zoom)
+        lay_grafico.addWidget(self.arbol_grafico)
+        splitter.addWidget(lado_grafico)
+
+        # ── Lado derecho: árbol lista coloreado ───────────────────────────
+        self.arbol_sintactico = QTreeWidget()
+        self.arbol_sintactico.setHeaderLabel("Árbol Sintáctico (AST)")
+        self.arbol_sintactico.setStyleSheet("""
+            QTreeWidget {
+                background-color: #1e1e1e;
+                color: #d4d4d4;
+                border: 1px solid #3e3e3e;
+                font-family: Consolas, monospace;
+                font-size: 13px;
+                outline: none;
+            }
+            QTreeWidget::item { padding: 3px 2px; }
+            QTreeWidget::item:selected { background-color: #264f78; color: #ffffff; }
+            QHeaderView::section {
+                background-color: #2d2d2d;
+                color: #ffffff;
+                padding: 5px;
+                border: 1px solid #3e3e3e;
+                font-weight: bold;
+            }
+        """)
+        splitter.addWidget(self.arbol_sintactico)
+
+        splitter.setSizes([640, 380])
+        return contenedor
 
     # ─── Barra de Estado ──────────────────────────────────────────────────────
 

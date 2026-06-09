@@ -211,6 +211,13 @@ def p_declaracion_sent(p):
     """declaracion : lista_sentencias"""
     p[0] = p[1]
 
+# Recuperación de errores a nivel de sentencia/declaración:
+# ante un error, PLY consume tokens hasta el ';' y produce un nodo ERROR_SINTACTICO,
+# de modo que el resto del árbol se sigue construyendo (igual que la referencia).
+def p_declaracion_error(p):
+    """declaracion : error PUNTO_Y_COMA"""
+    p[0] = ASTNode("ERROR_SINTACTICO", line=p.lineno(2))
+
 def p_declaracion_variable(p):
     """declaracion_variable : tipo identificador PUNTO_Y_COMA"""
     p[0] = ASTNode(
@@ -424,21 +431,23 @@ def p_op_logico(p):
     p[0] = ASTNode("OP_LOGICO", value=p[1], line=p.lineno(1))
 
 def p_error(p):
-    """Manejo de errores sintácticos con recuperación a nivel de sentencia."""
-    global _parser
+    """Manejo de errores sintácticos con recuperación a nivel de sentencia.
+
+    Solo registra el error. La recuperación la realiza PLY mediante la regla
+    'declaracion : error PUNTO_Y_COMA': se descartan los tokens conflictivos
+    hasta el ';' y se inserta un nodo ERROR_SINTACTICO, sin destruir el árbol.
+    """
     if p:
         _errores_sintacticos.append({
             "linea": getattr(p, "lineno", 0),
             "columna": getattr(p, "lexpos", 0),
             "descripcion": f"Token inesperado: '{p.value}' (tipo: {p.type})"
         })
-        # ✅ implemented by agent — calls parser.restart() for non-fatal recovery
-        _parser.restart()
     else:
         _errores_sintacticos.append({
             "linea": 0,
             "columna": 0,
-            "descripcion": "Fin de entrada inesperado"
+            "descripcion": "Fin de entrada inesperado (¿falta ';' o 'end'?)"
         })
 
 # ✅ implemented by agent — yacc.yacc(debug=False, write_tables=False, errorlog=yacc.NullLogger())
