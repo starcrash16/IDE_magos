@@ -14,6 +14,8 @@ from funciones_ide import (
     guardar_como_archivo,
     ejecutar_lexico,
     ejecutar_sintactico,
+    _hay_cambios_sin_guardar,
+    _confirmar_perder_cambios_o_guardar,
 )
 
 class CompiladorIDE(SetupInterfaz, QMainWindow):
@@ -33,12 +35,14 @@ class CompiladorIDE(SetupInterfaz, QMainWindow):
 
 # ── Acciones de archivo como métodos de la clase ─────────────────────────────
 
-CompiladorIDE.nuevo_archivo        = nuevo_archivo
-CompiladorIDE.abrir_archivo        = abrir_archivo
-CompiladorIDE.guardar_archivo      = guardar_archivo
-CompiladorIDE.guardar_como_archivo = guardar_como_archivo
-CompiladorIDE.ejecutar_lexico      = ejecutar_lexico
-CompiladorIDE.ejecutar_sintactico  = ejecutar_sintactico
+CompiladorIDE.nuevo_archivo                      = nuevo_archivo
+CompiladorIDE.abrir_archivo                      = abrir_archivo
+CompiladorIDE.guardar_archivo                    = guardar_archivo
+CompiladorIDE.guardar_como_archivo               = guardar_como_archivo
+CompiladorIDE.ejecutar_lexico                    = ejecutar_lexico
+CompiladorIDE.ejecutar_sintactico                = ejecutar_sintactico
+CompiladorIDE._hay_cambios_sin_guardar           = _hay_cambios_sin_guardar
+CompiladorIDE._confirmar_perder_cambios_o_guardar = _confirmar_perder_cambios_o_guardar
 
 # ─────────────────────────────────────────────────────────────────────────────
 

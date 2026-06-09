@@ -1,5 +1,4 @@
-main sum@r 3.14+main)if{32.algo
-34.34.34.34
+main
 {
 int x,y,z;
 float a,b,c;
@@ -37,9 +36,9 @@ do
    };
 
  while(y==5);
- while(y==0){
+ while(y==0 && f==4){
     cin mas;
-    cout x;
+    cout x+5/6;
 };
 }
 

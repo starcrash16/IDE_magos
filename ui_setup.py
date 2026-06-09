@@ -199,12 +199,14 @@ class SetupInterfaz:
 
     def abrir_archivo_desde_explorer(self, index):
         ruta = self.explorer_model.filePath(index)
-
         if not self.explorer_model.isDir(index):
             try:
                 with open(ruta, "r", encoding="utf-8") as f:
                     contenido = f.read()
-                    self.editor.setPlainText(contenido)
+                self.editor.setPlainText(contenido)
+                self.editor.document().setModified(False)
+                self.archivo_actual = ruta
+                self.setWindowTitle(f"IDE Compiladores - {ruta}")
             except Exception as e:
                 self.barra_estado.showMessage(f"Error al abrir archivo: {e}")
 

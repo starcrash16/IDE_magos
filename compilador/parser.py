@@ -190,6 +190,41 @@ class _LexerBridge:
 
 _errores_sintacticos = []
 
+# Declaraciones de nivel superior que se reducen correctamente durante el parseo.
+# Permite reconstruir un árbol parcial cuando el parseo global falla (p. ej. un
+# bloque sin cerrar consume la '}' final y 'programa' nunca se reduce).
+_declaraciones_parseadas = []
+
+# Mayor 'lista_sentencias' reducida. Por ser recursiva por la izquierda, PLY la
+# reduce de forma incremental; al fallar dentro de un bloque anidado la última
+# reducida sería un bloque interno pequeño, por eso conservamos la de mayor
+# tamaño (el bloque de sentencias de nivel superior). Sirve para rescatar las
+# sentencias en curso cuando el parseo global falla antes de que su 'declaracion'
+# contenedora llegue a reducir.
+_ultima_lista_sentencias = None
+
+
+def _tam_arbol(node):
+    if node is None:
+        return 0
+    return 1 + sum(_tam_arbol(c) for c in node.children)
+
+
+def _construir_ast_parcial():
+    """Ensambla un PROGRAMA con lo reducido hasta el punto de fallo."""
+    hijos = list(_declaraciones_parseadas)
+    if _ultima_lista_sentencias is not None and (
+        not hijos or hijos[-1] is not _ultima_lista_sentencias
+    ):
+        hijos.append(_ultima_lista_sentencias)
+    if not hijos:
+        return None
+    return ASTNode(
+        "PROGRAMA",
+        [ASTNode("LISTA_DECLARACION", hijos, line=hijos[0].line)],
+        line=hijos[0].line,
+    )
+
 # ✅ implemented by agent — Every non-terminal in the grammar has a corresponding p_* function.
 def p_programa(p):
     """programa : MAIN LLAVE_IZQ lista_declaracion LLAVE_DER"""
@@ -206,10 +241,13 @@ def p_lista_declaracion_single(p):
 def p_declaracion_var(p):
     """declaracion : declaracion_variable"""
     p[0] = p[1]
+    _declaraciones_parseadas.append(p[0])
 
 def p_declaracion_sent(p):
     """declaracion : lista_sentencias"""
     p[0] = p[1]
+    if p[0] is not None:
+        _declaraciones_parseadas.append(p[0])
 
 # Recuperación de errores a nivel de sentencia/declaración:
 # ante un error, PLY consume tokens hasta el ';' y produce un nodo ERROR_SINTACTICO,
@@ -217,6 +255,7 @@ def p_declaracion_sent(p):
 def p_declaracion_error(p):
     """declaracion : error PUNTO_Y_COMA"""
     p[0] = ASTNode("ERROR_SINTACTICO", line=p.lineno(2))
+    _declaraciones_parseadas.append(p[0])
 
 def p_declaracion_variable(p):
     """declaracion_variable : tipo identificador PUNTO_Y_COMA"""
@@ -255,10 +294,13 @@ def p_tipo(p):
 
 def p_lista_sentencias_multi(p):
     """lista_sentencias : lista_sentencias sentencia"""
+    global _ultima_lista_sentencias
     if p[1] is None:
         p[0] = ASTNode("LISTA_SENTENCIAS", [p[2]], line=p[2].line)
     else:
         p[0] = ASTNode("LISTA_SENTENCIAS", [p[1], p[2]], line=p[1].line)
+    if _tam_arbol(p[0]) >= _tam_arbol(_ultima_lista_sentencias):
+        _ultima_lista_sentencias = p[0]
 
 def p_lista_sentencias_empty(p):
     """lista_sentencias : """
@@ -272,6 +314,13 @@ def p_sentencia(p):
                  | sent_out
                  | asignacion"""
     p[0] = p[1]
+
+# Recuperación de errores también a nivel de sentencia: ante un error dentro de
+# un bloque (if/while/do), se descartan tokens hasta el ';' y se inserta un nodo
+# ERROR_SINTACTICO, sin destruir el bloque ni el resto del árbol.
+def p_sentencia_error(p):
+    """sentencia : error PUNTO_Y_COMA"""
+    p[0] = ASTNode("ERROR_SINTACTICO", line=p.lineno(2))
 
 # PUNTO_Y_COMA present (via sent_expresion)
 # identifier form correct (terminal)
@@ -468,13 +517,22 @@ def analizar(codigo_fuente: str) -> dict:
     lista_tokens  = resultado_lexico.get("tokens", [])
     errores_lex   = resultado_lexico.get("errores", [])
 
+    global _ultima_lista_sentencias
+    _ultima_lista_sentencias = None
     _errores_sintacticos.clear()
+    _declaraciones_parseadas.clear()
     lexer_bridge = _LexerBridge(lista_tokens)
 
     try:
         ast = _parser.parse(lexer=lexer_bridge, tracking=True)
     except Exception:
         ast = None
+
+    # Si el parseo global falló pero hubo declaraciones válidas, devolvemos un
+    # árbol parcial: el objetivo es mostrar siempre un árbol cuando el léxico es
+    # correcto, aunque existan errores sintácticos.
+    if ast is None:
+        ast = _construir_ast_parcial()
 
     return {
         "ast":                 ast_to_dict(ast),
@@ -505,13 +563,19 @@ def analizar_desde_archivo(ruta: str) -> dict:
     except Exception:
         pass
         
+    global _ultima_lista_sentencias
+    _ultima_lista_sentencias = None
     _errores_sintacticos.clear()
+    _declaraciones_parseadas.clear()
     lexer_bridge = _LexerBridge(tokens)
 
     try:
         ast = _parser.parse(lexer=lexer_bridge, tracking=True)
     except Exception:
         ast = None
+
+    if ast is None:
+        ast = _construir_ast_parcial()
 
     return {
         "ast":                 ast_to_dict(ast),

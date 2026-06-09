@@ -486,20 +486,18 @@ def ejecutar_sintactico(self):
 
     self.lista_errores.resizeColumnsToContents()
 
-    # ── Paso 7: Mostrar la pestaña correspondiente ───────────────────────
+    # ── Paso 7: Siempre mostrar el árbol; indicar errores en la barra ────
     total_errores = len(errores_lexicos) + len(errores_sintacticos)
 
+    indice_arbol = self.tabs_resultados.indexOf(self.tab_arbol)
+    self.tabs_resultados.setCurrentIndex(indice_arbol)
+
     if total_errores > 0:
-        # Si hay errores, ir a la pestaña de Errores
-        indice_errores = self.tabs_resultados.indexOf(self.lista_errores)
-        self.tabs_resultados.setCurrentIndex(indice_errores)
         self.barra_estado.showMessage(
-            f"Análisis sintáctico completado: {total_errores} error(es)", 5000
+            f"Análisis sintáctico: {total_errores} error(es) — "
+            f"el árbol muestra nodos ERROR en rojo · ver pestaña Errores", 8000
         )
     else:
-        # Si no hay errores, ir a la pestaña de Árbol Sintáctico
-        indice_arbol = self.tabs_resultados.indexOf(self.tab_arbol)
-        self.tabs_resultados.setCurrentIndex(indice_arbol)
         self.barra_estado.showMessage(
             "Análisis sintáctico completado: sin errores ✓", 5000
         )
