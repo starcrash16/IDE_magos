@@ -38,6 +38,8 @@ COLORES_NODO = {
     "PROGRAMA":             "#4fc1ff",
     "LISTA_DECLARACION":    "#4fc1ff",
     "LISTA_SENTENCIAS":     "#4fc1ff",
+    "BLOQUE":               "#4fc1ff",   # AST: equivale a LISTA_SENTENCIAS
+    "VACIO":                "#858585",   # AST: sentencia/expresión vacía
 
     # Declaraciones / tipos
     "DECLARACION_VARIABLE": "#4ec9b0",
@@ -131,13 +133,15 @@ class ArbolGraficoView(QGraphicsView):
         self.setStyleSheet("border: 1px solid #3e3e3e;")
 
         self._scale = 1.0
-        self._pos = {}   # id(nodo) -> (cx, cy)
+        self._pos = {}            # id(nodo) -> (cx, cy)
+        self._highlight_item = None
 
     # ── API pública ────────────────────────────────────────────────────────
     def dibujar(self, ast_dict):
         """Reconstruye la escena a partir de un nodo AST (dict) o None."""
         self._scene.clear()
         self._pos.clear()
+        self._highlight_item = None
 
         if not ast_dict:
             aviso = self._scene.addText(
@@ -171,6 +175,37 @@ class ArbolGraficoView(QGraphicsView):
         if self._scene.itemsBoundingRect().isValid():
             self.fitInView(self._scene.itemsBoundingRect(), Qt.KeepAspectRatio)
             self._scale = self.transform().m11()
+
+    def highlight_nodo(self, node):
+        """Centra la vista en el nodo y dibuja un borde de selección sobre él."""
+        if node is None:
+            return
+        nid = id(node)
+        if nid not in self._pos:
+            return
+
+        # Eliminar highlight anterior
+        if self._highlight_item is not None:
+            self._scene.removeItem(self._highlight_item)
+            self._highlight_item = None
+
+        cx, cy = self._pos[nid]
+
+        # Borde brillante alrededor del nodo
+        margen = 6
+        x1 = cx - self.NODE_W / 2 - margen
+        y1 = cy - self.NODE_H / 2 - margen
+        path = QPainterPath()
+        path.addRoundedRect(
+            QRectF(x1, y1, self.NODE_W + margen * 2, self.NODE_H + margen * 2),
+            11, 11
+        )
+        pen = QPen(QColor("#ffffff"), 2.5, Qt.DashLine)
+        pen.setDashPattern([4, 3])
+        self._highlight_item = self._scene.addPath(path, pen, QBrush(Qt.NoBrush))
+
+        # Centrar la vista en el nodo seleccionado
+        self.centerOn(cx, cy)
 
     # ── Zoom con Ctrl + rueda ──────────────────────────────────────────────
     def wheelEvent(self, event):

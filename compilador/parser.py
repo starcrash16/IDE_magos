@@ -35,7 +35,11 @@ sent_expresion    -> expresion ;
 seleccion         -> if expresion then lista_sentencias end
                    | if expresion then lista_sentencias else lista_sentencias end
 iteracion         -> while expresion lista_sentencias end
-repeticion        -> do lista_sentencias while expresion
+                   | for ( asignacion_simple ; expresion ; incremento ) lista_sentencias end
+repeticion        -> do lista_sentencias while expresion ;
+asignacion_simple -> id = expresion
+incremento        -> id ++ | id -- | asignacion_simple
+sentencia         -> ... | id ++ ; | id -- ;
 sent_in           -> cin >> id ;
 sent_out          -> cout << salida ;
 salida            -> cadena
@@ -105,7 +109,7 @@ tokens = (
     "OP_ARITMETICO", "OP_RELACIONAL", "OP_LOGICO", "ASIGNACION", "PARENTESIS_IZQ", "PARENTESIS_DER",
     "LLAVE_IZQ", "LLAVE_DER", "COMA", "PUNTO_Y_COMA", "DOS_PUNTOS", "INSERCION", "EXTRACCION",
     # Additional specific grammar tokens mapped by the LexerBridge
-    "MAIN", "INT", "FLOAT", "BOOL", "IF", "THEN", "ELSE", "END", "WHILE", "DO", "CIN", "COUT",
+    "MAIN", "INT", "FLOAT", "BOOL", "IF", "THEN", "ELSE", "END", "WHILE", "DO", "FOR", "CIN", "COUT",
     "MENOR", "MENOR_IGUAL", "MAYOR", "MAYOR_IGUAL", "IGUAL_IGUAL", "DIFERENTE",
     "MAS", "MENOS", "MAS_MAS", "MENOS_MENOS",
     "POR", "ENTRE", "MODULO",
@@ -130,7 +134,7 @@ precedence = (
 _KW_MAP = {
     "main": "MAIN", "int": "INT", "float": "FLOAT", "bool": "BOOL",
     "if": "IF", "then": "THEN", "else": "ELSE", "end": "END",
-    "while": "WHILE", "do": "DO", "cin": "CIN", "cout": "COUT",
+    "while": "WHILE", "do": "DO", "for": "FOR", "cin": "CIN", "cout": "COUT",
 }
 
 _REL_MAP = {
@@ -232,7 +236,11 @@ def p_programa(p):
 
 def p_lista_declaracion_multi(p):
     """lista_declaracion : lista_declaracion declaracion"""
-    p[0] = ASTNode("LISTA_DECLARACION", [p[1], p[2]], line=p[1].line)
+    # Lista plana: cada declaración se agrega como hermana en el mismo nodo,
+    # en lugar de anidar un nuevo LISTA_DECLARACION (que producía una "escalera").
+    if p[2] is not None:
+        p[1].children.append(p[2])
+    p[0] = p[1]
 
 def p_lista_declaracion_single(p):
     """lista_declaracion : declaracion"""
@@ -259,9 +267,11 @@ def p_declaracion_error(p):
 
 def p_declaracion_variable(p):
     """declaracion_variable : tipo identificador PUNTO_Y_COMA"""
+    # p[2] es una lista plana de nodos ID: todas las variables declaradas en la
+    # misma sentencia quedan como hermanas bajo el mismo DECLARACION_VARIABLE.
     p[0] = ASTNode(
         "DECLARACION_VARIABLE",
-        [p[1], p[2]],
+        [p[1]] + p[2],
         line=p[1].line,
     )
 
@@ -278,13 +288,15 @@ def p_declaracion_variable_asignacion(p):
         line=p[1].line,
     )
 
+# 'identificador' acumula los ID en una lista de Python (no en un árbol binario),
+# de modo que 'int x,y,z,r;' produzca cuatro hermanos al mismo nivel.
 def p_identificador_single(p):
     """identificador : IDENTIFICADOR"""
-    p[0] = ASTNode("ID", value=p[1], line=p.lineno(1))
+    p[0] = [ASTNode("ID", value=p[1], line=p.lineno(1))]
 
 def p_identificador_multi(p):
     """identificador : identificador COMA IDENTIFICADOR"""
-    p[0] = ASTNode("ID_MULTI", [p[1], ASTNode("ID", value=p[3], line=p.lineno(3))], line=p[1].line)
+    p[0] = p[1] + [ASTNode("ID", value=p[3], line=p.lineno(3))]
 
 def p_tipo(p):
     """tipo : INT
@@ -295,10 +307,12 @@ def p_tipo(p):
 def p_lista_sentencias_multi(p):
     """lista_sentencias : lista_sentencias sentencia"""
     global _ultima_lista_sentencias
+    # Lista plana: las sentencias se acumulan como hermanas en el mismo nodo.
     if p[1] is None:
         p[0] = ASTNode("LISTA_SENTENCIAS", [p[2]], line=p[2].line)
     else:
-        p[0] = ASTNode("LISTA_SENTENCIAS", [p[1], p[2]], line=p[1].line)
+        p[1].children.append(p[2])
+        p[0] = p[1]
     if _tam_arbol(p[0]) >= _tam_arbol(_ultima_lista_sentencias):
         _ultima_lista_sentencias = p[0]
 
@@ -322,41 +336,88 @@ def p_sentencia_error(p):
     """sentencia : error PUNTO_Y_COMA"""
     p[0] = ASTNode("ERROR_SINTACTICO", line=p.lineno(2))
 
-# PUNTO_Y_COMA present (via sent_expresion)
-# identifier form correct (terminal)
+# La asignación con ';' reutiliza 'asignacion_simple' (id = expresion) para no
+# duplicar la producción 'IDENTIFICADOR ASIGNACION expresion' (evita un conflicto
+# reduce/reduce con el for). Se conserva el envoltorio SENT_EXPRESION.
 def p_asignacion(p):
-    """asignacion : IDENTIFICADOR ASIGNACION sent_expresion"""
-    p[0] = ASTNode("ASIGNACION", [ASTNode("ID", value=p[1], line=p.lineno(1)), p[3]], line=p.lineno(1))
+    """asignacion : asignacion_simple PUNTO_Y_COMA"""
+    ident, expr = p[1].children[0], p[1].children[1]
+    p[0] = ASTNode("ASIGNACION", [ident, ASTNode("SENT_EXPRESION", [expr], line=expr.line)], line=p[1].line)
 
-# PUNTO_Y_COMA present
-def p_sent_expresion_full(p):
-    """sent_expresion : expresion PUNTO_Y_COMA"""
-    p[0] = ASTNode("SENT_EXPRESION", [p[1]], line=p[1].line)
+def p_asignacion_vacia(p):
+    """asignacion : IDENTIFICADOR ASIGNACION PUNTO_Y_COMA"""
+    p[0] = ASTNode(
+        "ASIGNACION",
+        [ASTNode("ID", value=p[1], line=p.lineno(1)), ASTNode("SENT_EXPRESION", line=p.lineno(2))],
+        line=p.lineno(1),
+    )
 
-# PUNTO_Y_COMA present
-def p_sent_expresion_empty(p):
-    """sent_expresion : PUNTO_Y_COMA"""
-    p[0] = ASTNode("SENT_EXPRESION", line=p.lineno(1))
+# Terminador de bloque: acepta 'end' o 'end;' (el ';' final es opcional, como en
+# pruebamtaBlanca.txt). No produce nodo; solo cierra el bloque.
+def p_fin_bloque(p):
+    """fin_bloque : END
+                  | END PUNTO_Y_COMA"""
+    p[0] = None
 
-# block terminators correct
+# Con 'end' explícito cada 'if' se cierra de forma no ambigua: NO hay problema de
+# dangling else, porque el 'else' solo puede pertenecer al 'if' aún abierto.
 def p_seleccion_if(p):
-    """seleccion : IF expresion THEN lista_sentencias END"""
+    """seleccion : IF expresion THEN lista_sentencias fin_bloque"""
     p[0] = ASTNode("SELECCION", [p[2], p[4]], line=p.lineno(1))
 
-# block terminators correct
 def p_seleccion_if_else(p):
-    """seleccion : IF expresion THEN lista_sentencias ELSE lista_sentencias END"""
+    """seleccion : IF expresion THEN lista_sentencias ELSE lista_sentencias fin_bloque"""
     p[0] = ASTNode("SELECCION", [p[2], p[4], p[6]], line=p.lineno(1))
 
-# block terminators correct
 def p_iteracion(p):
-    """iteracion : WHILE expresion lista_sentencias END"""
+    """iteracion : WHILE expresion lista_sentencias fin_bloque"""
     p[0] = ASTNode("ITERACION", [p[2], p[3]], line=p.lineno(1))
 
-# block terminators correct
+# El ';' final cierra el do-while de forma inequívoca (estilo C: do ... while(c);).
+# Sin él, un 'while' que siguiera al do-while sería ambiguo (¿cierra el do o
+# inicia un ciclo nuevo?). El terminador elimina ese conflicto.
 def p_repeticion(p):
-    """repeticion : DO lista_sentencias WHILE expresion"""
+    """repeticion : DO lista_sentencias WHILE expresion PUNTO_Y_COMA"""
     p[0] = ASTNode("REPETICION", [p[2], p[4]], line=p.lineno(1))
+
+# Ciclo for: for ( init ; condicion ; incremento ) cuerpo end
+# El AST agrupa explícitamente inicialización, condición, incremento y cuerpo
+# para que la jerarquía del ciclo quede clara.
+def p_iteracion_for(p):
+    """iteracion : FOR PARENTESIS_IZQ asignacion_simple PUNTO_Y_COMA expresion PUNTO_Y_COMA incremento PARENTESIS_DER lista_sentencias fin_bloque"""
+    p[0] = ASTNode(
+        "CICLO_FOR",
+        [
+            ASTNode("INICIALIZACION", [p[3]], line=p[3].line),
+            ASTNode("CONDICION", [p[5]], line=p[5].line),
+            ASTNode("INCREMENTO", [p[7]], line=p[7].line),
+            ASTNode("CUERPO", [p[9]] if p[9] is not None else [], line=p.lineno(1)),
+        ],
+        line=p.lineno(1),
+    )
+
+# Asignación sin ';' (reutilizable en la inicialización del for).
+def p_asignacion_simple(p):
+    """asignacion_simple : IDENTIFICADOR ASIGNACION expresion"""
+    p[0] = ASTNode("ASIGNACION", [ASTNode("ID", value=p[1], line=p.lineno(1)), p[3]], line=p.lineno(1))
+
+# Incremento/decremento: i++ , i-- o i = expresion
+def p_incremento_postfijo(p):
+    """incremento : IDENTIFICADOR MAS_MAS
+                  | IDENTIFICADOR MENOS_MENOS"""
+    p[0] = ASTNode("INCREMENTO_OP", [ASTNode("ID", value=p[1], line=p.lineno(1))], value=p[2], line=p.lineno(1))
+
+def p_incremento_asignacion(p):
+    """incremento : asignacion_simple"""
+    p[0] = p[1]
+
+# Permite usar 'i++;' / 'c--;' como sentencia independiente.
+# Se escribe con terminales explícitos (no reusa 'incremento') para no chocar
+# con 'asignacion' cuando el lookahead es '=': aquí el lookahead siempre es ++/--.
+def p_sentencia_incremento(p):
+    """sentencia : IDENTIFICADOR MAS_MAS PUNTO_Y_COMA
+                 | IDENTIFICADOR MENOS_MENOS PUNTO_Y_COMA"""
+    p[0] = ASTNode("INCREMENTO_OP", [ASTNode("ID", value=p[1], line=p.lineno(1))], value=p[2], line=p.lineno(1))
 
 # PUNTO_Y_COMA present
 # identifier form correct (terminal)
@@ -391,12 +452,12 @@ def p_expresion_simple_only(p):
 
 def p_expresion_rel(p):
     """expresion : expresion_simple rel_op expresion_simple"""
-    p[0] = ASTNode("EXPRESION_RELACIONAL", [p[1], p[2], p[3]], line=p[1].line)
+    p[0] = ASTNode("OPERACION", [p[1], p[3]], value=p[2].value, line=p[1].line)
 
 def p_expresion_logica(p):
     """expresion : expresion AND expresion
                  | expresion OR expresion"""
-    p[0] = ASTNode("EXPRESION_LOGICA", [p[1], p[3]], value=p[2], line=p[1].line)
+    p[0] = ASTNode("OPERACION", [p[1], p[3]], value=p[2], line=p[1].line)
 
 def p_rel_op(p):
     """rel_op : MENOR
@@ -409,7 +470,8 @@ def p_rel_op(p):
 
 def p_expresion_simple_suma(p):
     """expresion_simple : expresion_simple suma_op termino"""
-    p[0] = ASTNode("EXPRESION_SIMPLE", [p[1], p[2], p[3]], line=p[1].line)
+    # Recursión por la izquierda -> asociatividad izquierda: a - b - c = (a - b) - c
+    p[0] = ASTNode("OPERACION", [p[1], p[3]], value=p[2].value, line=p[1].line)
 
 def p_expresion_simple_term(p):
     """expresion_simple : termino"""
@@ -424,7 +486,8 @@ def p_suma_op(p):
 
 def p_termino_mult(p):
     """termino : termino mult_op factor"""
-    p[0] = ASTNode("TERMINO", [p[1], p[2], p[3]], line=p[1].line)
+    # '*', '/', '%' ligan más fuerte que '+'/'-' por estar en un nivel inferior.
+    p[0] = ASTNode("OPERACION", [p[1], p[3]], value=p[2].value, line=p[1].line)
 
 def p_termino_factor(p):
     """termino : factor"""
@@ -438,7 +501,7 @@ def p_mult_op(p):
 
 def p_factor_pot(p):
     """factor : factor pot_op componente"""
-    p[0] = ASTNode("FACTOR", [p[1], p[2], p[3]], line=p[1].line)
+    p[0] = ASTNode("OPERACION", [p[1], p[3]], value=p[2].value, line=p[1].line)
 
 def p_factor_comp(p):
     """factor : componente"""

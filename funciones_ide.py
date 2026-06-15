@@ -341,7 +341,47 @@ def ejecutar_lexico(self):
 
 from PySide6.QtWidgets import QTreeWidgetItem
 from PySide6.QtGui import QFont
+from PySide6.QtCore import Qt
 from arbol_grafico import color_para
+
+# ── Abstracción del AST ──────────────────────────────────────────────────────
+# El parser produce el árbol gramatical EXTENDIDO (árbol de derivación), con
+# nodos de relleno propios de la gramática. La versión ABSTRACTA elimina ese
+# ruido para mostrar solo la estructura esencial del programa.
+
+# Nodos envoltorio que no aportan información: se reemplazan por su único hijo.
+_AST_PASSTHROUGH = {"SENT_EXPRESION", "SALIDA_EXPRESION"}
+
+# Nodos que en el AST se nombran de forma más directa.
+_AST_RENAME = {
+    "COMPONENTE_ID":   "ID",
+    "COMPONENTE_BOOL": "BOOL",
+    "LISTA_SENTENCIAS": "BLOQUE",
+}
+
+
+def _abstraer_ast(node):
+    """Convierte el árbol gramatical extendido (dict) en un AST limpio (dict)."""
+    if not node:
+        return None
+
+    tipo = node.get("type", "")
+    hijos = [a for a in (_abstraer_ast(c) for c in node.get("children", [])) if a]
+
+    # Envoltorios: si solo tienen un hijo, se sustituyen por él (se "saltan").
+    if tipo in _AST_PASSTHROUGH:
+        if len(hijos) == 1:
+            return hijos[0]
+        # Caso 'x = ;' → expresión vacía.
+        return {"type": "VACIO", "value": None, "line": node.get("line"), "children": []}
+
+    return {
+        "type":     _AST_RENAME.get(tipo, tipo),
+        "value":    node.get("value"),
+        "line":     node.get("line"),
+        "children": hijos,
+    }
+
 
 def _populate_tree_widget(parent_item, node):
     """Convierte un nodo AST (dict) a QTreeWidgetItem coloreado (una columna)."""
@@ -361,6 +401,7 @@ def _populate_tree_widget(parent_item, node):
 
     item = QTreeWidgetItem(parent_item)
     item.setText(0, etiqueta)
+    item.setData(0, Qt.UserRole, node)  # enlace al nodo AST para sincronización
 
     # Color del texto según el tipo de nodo
     _bg, fg = color_para(tipo)
@@ -446,22 +487,40 @@ def ejecutar_sintactico(self):
         return
 
     ast_dict = datos.get("ast")
+    self._ultimo_ast = ast_dict
     errores_lexicos = datos.get("errores_lexicos", [])
     errores_sintacticos = datos.get("errores_sintacticos", [])
 
-    # ── Paso 5: Mostrar el AST en la pestaña Árbol Sintáctico ────────────
-    # 5a. Árbol lista (QTreeWidget coloreado)
-    self.arbol_sintactico.clear()
+    # ── Paso 5: Mostrar el árbol en sus 3 vistas ─────────────────────────
+    # Vista 1: gráfica (cajas con zoom) — dibuja el árbol gramatical extendido.
+    # Vista 2: AST abstracto (lista desplegable).
+    # Vista 3: gramática extendida / árbol de derivación (lista desplegable).
+    ast_abstracto = _abstraer_ast(ast_dict)
+    self._ultimo_ast_abstracto = ast_abstracto
 
+    # 5a. Árbol gramatical extendido (QTreeWidget coloreado)
+    self.arbol_sintactico.clear()
     if ast_dict:
         _populate_tree_widget(self.arbol_sintactico, ast_dict)
         self.arbol_sintactico.expandAll()
+        self.arbol_sintactico.resizeColumnToContents(0)
     else:
         err_item = QTreeWidgetItem(self.arbol_sintactico)
         err_item.setText(0, "⚠ No se pudo construir el árbol sintáctico.")
         err_item.setForeground(0, QColor("#ff6b6b"))
 
-    # 5b. Árbol gráfico (cajas con zoom)
+    # 5b. AST abstracto (QTreeWidget coloreado)
+    self.arbol_ast.clear()
+    if ast_abstracto:
+        _populate_tree_widget(self.arbol_ast, ast_abstracto)
+        self.arbol_ast.expandAll()
+        self.arbol_ast.resizeColumnToContents(0)
+    else:
+        err_item = QTreeWidgetItem(self.arbol_ast)
+        err_item.setText(0, "⚠ No se pudo construir el AST.")
+        err_item.setForeground(0, QColor("#ff6b6b"))
+
+    # 5c. Árbol gráfico (cajas con zoom)
     self.arbol_grafico.dibujar(ast_dict)
 
     # ── Paso 6: Llenar la tabla de Errores ───────────────────────────────
