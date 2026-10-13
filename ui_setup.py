@@ -22,6 +22,87 @@ from PySide6.QtGui import QColor
 # Resaltador de sintaxis para el editor de código
 from syntax_highlighter import MiHighlighter
 
+
+# ─── Estilos compartidos por los paneles de árboles ──────────────────────────
+# (Árbol Sintáctico, Semántica y la ventana flotante)
+
+ESTILO_ARBOL_LISTA = """
+    QTreeWidget {
+        background-color: #1e1e1e;
+        color: #d4d4d4;
+        border: 1px solid #3e3e3e;
+        font-family: Consolas, monospace;
+        font-size: 13px;
+        outline: none;
+    }
+    QTreeWidget::item { padding: 3px 2px; }
+    QTreeWidget::item:selected { background-color: #264f78; color: #ffffff; }
+    QHeaderView::section {
+        background-color: #2d2d2d;
+        color: #ffffff;
+        padding: 5px;
+        border: 1px solid #3e3e3e;
+        font-weight: bold;
+    }
+"""
+
+ESTILO_BOTON = """
+    QPushButton {
+        background-color: #3e3e3e;
+        color: #f5f5f5;
+        border: none;
+        border-radius: 4px;
+        padding: 2px 10px;
+        font-weight: bold;
+    }
+    QPushButton:hover { background-color: #264f78; color: #ffffff; }
+"""
+
+ESTILO_SUBPESTANAS = """
+    QTabWidget::pane { border: 1px solid #3e3e3e; }
+    QTabBar::tab {
+        background: #2d2d2d; color: #d4d4d4;
+        padding: 4px 12px; border: 1px solid #3e3e3e;
+    }
+    QTabBar::tab:selected { background: #264f78; color: #ffffff; }
+"""
+
+
+def crear_arbol_lista(titulo):
+    """QTreeWidget oscuro de una columna para mostrar un árbol como lista desplegable."""
+    from PySide6.QtWidgets import QTreeWidget
+    arbol = QTreeWidget()
+    arbol.setHeaderLabel(titulo)
+    arbol.setStyleSheet(ESTILO_ARBOL_LISTA)
+    arbol.header().setStretchLastSection(False)
+    arbol.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+    return arbol
+
+
+def _ruta_item(item):
+    """Posición de un QTreeWidgetItem como lista de índices desde la raíz."""
+    ruta = []
+    while item is not None:
+        padre = item.parent()
+        if padre is None:
+            ruta.append(item.treeWidget().indexOfTopLevelItem(item))
+        else:
+            ruta.append(padre.indexOfChild(item))
+        item = padre
+    return list(reversed(ruta))
+
+
+def _item_por_ruta(arbol, ruta):
+    """Item de 'arbol' en la misma posición (o None si no existe)."""
+    if not ruta:
+        return None
+    item = arbol.topLevelItem(ruta[0])
+    for indice in ruta[1:]:
+        if item is None:
+            return None
+        item = item.child(indice)
+    return item
+
 class LineNumberArea(QWidget):
     def __init__(self, editor):
         super().__init__(editor)
@@ -363,7 +444,8 @@ class SetupInterfaz:
         # ── Conectar acciones del compilador ──────────────────────────────────
         self.act_lexico.triggered.connect(self.ejecutar_lexico)
         self.act_sintactico.triggered.connect(self.ejecutar_sintactico)
-        
+        self.act_semantico.triggered.connect(self.ejecutar_semantico)
+
     # ─── Barra de Herramientas ────────────────────────────────────────────────
 
     def crear_barra_herramientas(self):
@@ -449,8 +531,10 @@ class SetupInterfaz:
         self.tabla_tokens.setAlternatingRowColors(True)
 
         # ── Tabla de Símbolos ─────────────────────────────────────────────
-        self.tabla_simbolos = QTableWidget(0, 4)
-        self.tabla_simbolos.setHorizontalHeaderLabels(["ID", "Tipo", "Valor", "Línea"])
+        self.tabla_simbolos = QTableWidget(0, 8)
+        self.tabla_simbolos.setHorizontalHeaderLabels(
+            ["Nombre", "Tipo", "Dirección", "Tamaño", "Valor", "Ámbito", "Línea decl.", "Líneas"]
+        )
         self.tabla_simbolos.setStyleSheet(estilo_tabla)
         self.tabla_simbolos.horizontalHeader().setStretchLastSection(True)
         self.tabla_simbolos.setEditTriggers(QTableWidget.NoEditTriggers)
@@ -469,9 +553,8 @@ class SetupInterfaz:
         # ── Árbol Sintáctico (gráfico + lista) ────────────────────────────
         self.tab_arbol = self.crear_panel_arbol()
 
-        self.analisis_semantico = QTextEdit()
-        self.analisis_semantico.setReadOnly(True)
-        self.analisis_semantico.setStyleSheet(estilo_texto)
+        # ── Análisis semántico (AST original vs anotado + recorrido) ──────
+        self.tab_semantico = self.crear_panel_semantico(estilo_tabla)
 
         self.codigo_intermedio = QTextEdit()
         self.codigo_intermedio.setReadOnly(True)
@@ -484,7 +567,7 @@ class SetupInterfaz:
         # ── Agregar pestañas ──────────────────────────────────────────────
         self.tabs_resultados.addTab(self.tabla_tokens,      "Tokens")
         self.tabs_resultados.addTab(self.tab_arbol,         "Árbol Sintáctico")
-        self.tabs_resultados.addTab(self.analisis_semantico, "Semántica")
+        self.tabs_resultados.addTab(self.tab_semantico,     "Semántica")
         self.tabs_resultados.addTab(self.codigo_intermedio, "Cód. Intermedio")
         self.tabs_resultados.addTab(self.tabla_simbolos,    "Símbolos")
         self.tabs_resultados.addTab(self.lista_errores,     "Errores")
@@ -502,7 +585,6 @@ class SetupInterfaz:
             self.arbol_grafico    -> ArbolGraficoView
             self.arbol_sintactico -> QTreeWidget  (usado por ejecutar_sintactico)
         """
-        from PySide6.QtWidgets import QTreeWidget
         from arbol_grafico import ArbolGraficoView
 
         contenedor = QWidget()
@@ -535,22 +617,11 @@ class SetupInterfaz:
 
         self.arbol_grafico = ArbolGraficoView()
 
-        estilo_btn = """
-            QPushButton {
-                background-color: #3e3e3e;
-                color: #f5f5f5;
-                border: none;
-                border-radius: 4px;
-                padding: 2px 10px;
-                font-weight: bold;
-            }
-            QPushButton:hover { background-color: #264f78; color: #ffffff; }
-        """
         btn_menos = QPushButton("−")
         btn_reset = QPushButton("1:1")
         btn_mas = QPushButton("+")
         for b in (btn_menos, btn_reset, btn_mas):
-            b.setStyleSheet(estilo_btn)
+            b.setStyleSheet(ESTILO_BOTON)
             b.setCursor(Qt.PointingHandCursor)
             lay_zoom.addWidget(b)
 
@@ -560,7 +631,7 @@ class SetupInterfaz:
 
         lay_zoom.addSpacing(12)
         btn_ventana = QPushButton("⧉ Ventana")
-        btn_ventana.setStyleSheet(estilo_btn)
+        btn_ventana.setStyleSheet(ESTILO_BOTON)
         btn_ventana.setCursor(Qt.PointingHandCursor)
         btn_ventana.setToolTip("Abrir árbol en ventana flotante independiente")
         lay_zoom.addWidget(btn_ventana)
@@ -573,51 +644,17 @@ class SetupInterfaz:
         # ── Lado derecho: dos vistas desplegables en pestañas ─────────────
         #   • AST (abstracto): estructura esencial, sin nodos de relleno.
         #   • Gramática (extendido): árbol de derivación completo.
-        estilo_arbol = """
-            QTreeWidget {
-                background-color: #1e1e1e;
-                color: #d4d4d4;
-                border: 1px solid #3e3e3e;
-                font-family: Consolas, monospace;
-                font-size: 13px;
-                outline: none;
-            }
-            QTreeWidget::item { padding: 3px 2px; }
-            QTreeWidget::item:selected { background-color: #264f78; color: #ffffff; }
-            QHeaderView::section {
-                background-color: #2d2d2d;
-                color: #ffffff;
-                padding: 5px;
-                border: 1px solid #3e3e3e;
-                font-weight: bold;
-            }
-        """
-
-        def _crear_arbol_lista(titulo):
-            arbol = QTreeWidget()
-            arbol.setHeaderLabel(titulo)
-            arbol.setStyleSheet(estilo_arbol)
-            arbol.header().setStretchLastSection(False)
-            arbol.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-            return arbol
 
         # AST abstracto (vista limpia)
-        self.arbol_ast = _crear_arbol_lista("AST (abstracto)")
+        self.arbol_ast = crear_arbol_lista("AST (abstracto)")
 
         # Gramática extendida / árbol de derivación.
         # Se mantiene el nombre 'arbol_sintactico' por compatibilidad y porque
         # es el árbol que se sincroniza con la vista gráfica.
-        self.arbol_sintactico = _crear_arbol_lista("Gramática (extendido)")
+        self.arbol_sintactico = crear_arbol_lista("Gramática (extendido)")
 
         tabs_listas = QTabWidget()
-        tabs_listas.setStyleSheet("""
-            QTabWidget::pane { border: 1px solid #3e3e3e; }
-            QTabBar::tab {
-                background: #2d2d2d; color: #d4d4d4;
-                padding: 4px 12px; border: 1px solid #3e3e3e;
-            }
-            QTabBar::tab:selected { background: #264f78; color: #ffffff; }
-        """)
+        tabs_listas.setStyleSheet(ESTILO_SUBPESTANAS)
         tabs_listas.addTab(self.arbol_ast, "AST")
         tabs_listas.addTab(self.arbol_sintactico, "Gramática extendida")
         splitter.addWidget(tabs_listas)
@@ -630,6 +667,134 @@ class SetupInterfaz:
         self.arbol_ast.currentItemChanged.connect(self._on_arbol_item_changed)
 
         return contenedor
+
+    # ─── Panel del Análisis Semántico ─────────────────────────────────────────
+
+    def crear_panel_semantico(self, estilo_tabla):
+        """
+        Construye la pestaña "Semántica":
+            AST original | AST con anotaciones semánticas | Recorrido semántico
+
+        Los dos árboles tienen la misma forma: al seleccionar un nodo en uno se
+        selecciona el mismo nodo en el otro, para comparar qué atributos se
+        agregaron. El recorrido muestra cada inserción/búsqueda en la tabla de
+        símbolos, los tipos calculados, las conversiones y los errores.
+
+        Deja como atributos:
+            self.arbol_sem_original -> QTreeWidget (AST de la fase sintáctica)
+            self.arbol_sem_anotado  -> QTreeWidget (AST anotado)
+            self.tabla_traza        -> QTableWidget (recorrido semántico)
+        """
+        contenedor = QWidget()
+        layout = QVBoxLayout(contenedor)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # ── Barra superior: título, leyenda y acciones ────────────────────
+        barra = QWidget()
+        barra.setStyleSheet("background-color: #2d2d2d;")
+        lay_barra = QHBoxLayout(barra)
+        lay_barra.setContentsMargins(8, 4, 8, 4)
+
+        lbl_titulo = QLabel("ANÁLISIS SEMÁNTICO")
+        lbl_titulo.setStyleSheet("color: #4fc1ff; font-weight: bold;")
+        lay_barra.addWidget(lbl_titulo)
+
+        lbl_leyenda = QLabel("↑ sintetizado · ↓ heredado · conv = conversión implícita · rojo = error")
+        lbl_leyenda.setStyleSheet("color: #858585; font-size: 11px;")
+        lay_barra.addWidget(lbl_leyenda)
+        lay_barra.addStretch()
+
+        btn_grafico = QPushButton("⧉ Árbol anotado")
+        btn_grafico.setToolTip("Abrir el árbol anotado en una ventana con vista gráfica")
+        btn_grafico.clicked.connect(self.abrir_arbol_anotado_en_ventana)
+
+        btn_reporte = QPushButton("💾 Exportar reporte")
+        btn_reporte.setToolTip("Guardar árbol anotado, tabla de símbolos, errores y recorrido en un .txt")
+        btn_reporte.clicked.connect(self.exportar_reporte_semantico)
+
+        for b in (btn_grafico, btn_reporte):
+            b.setStyleSheet(ESTILO_BOTON)
+            b.setCursor(Qt.PointingHandCursor)
+            lay_barra.addWidget(b)
+
+        layout.addWidget(barra)
+
+        # ── AST original | AST anotado | Recorrido ────────────────────────
+        splitter = QSplitter(Qt.Horizontal)
+        layout.addWidget(splitter, 1)
+
+        self.arbol_sem_original = crear_arbol_lista("AST original (fase sintáctica)")
+        self.arbol_sem_anotado = crear_arbol_lista("AST con anotaciones semánticas")
+
+        self.tabla_traza = QTableWidget(0, 3)
+        self.tabla_traza.setHorizontalHeaderLabels(["Línea", "Acción", "Detalle"])
+        self.tabla_traza.setStyleSheet(estilo_tabla)
+        self.tabla_traza.horizontalHeader().setStretchLastSection(True)
+        self.tabla_traza.verticalHeader().setVisible(False)
+        self.tabla_traza.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.tabla_traza.setSelectionBehavior(QTableWidget.SelectRows)
+
+        # Encabezado con el mismo estilo que el de los árboles
+        panel_traza = QWidget()
+        lay_traza = QVBoxLayout(panel_traza)
+        lay_traza.setContentsMargins(0, 0, 0, 0)
+        lay_traza.setSpacing(0)
+        lbl_traza = QLabel("Recorrido semántico (tabla de símbolos y tipos)")
+        lbl_traza.setStyleSheet(
+            "background-color: #2d2d2d; color: #ffffff; font-weight: bold;"
+            "padding: 5px; border: 1px solid #3e3e3e;"
+        )
+        lay_traza.addWidget(lbl_traza)
+        lay_traza.addWidget(self.tabla_traza, 1)
+
+        splitter.addWidget(self.arbol_sem_original)
+        splitter.addWidget(self.arbol_sem_anotado)
+        splitter.addWidget(panel_traza)
+        splitter.setSizes([300, 460, 420])
+
+        self.arbol_sem_original.currentItemChanged.connect(self._on_semantico_item_changed)
+        self.arbol_sem_anotado.currentItemChanged.connect(self._on_semantico_item_changed)
+        self.tabla_traza.cellClicked.connect(self._on_traza_clicked)
+
+        return contenedor
+
+    def _on_semantico_item_changed(self, current, _previous):
+        """Selecciona el mismo nodo en el otro árbol y lo resalta en el editor."""
+        if current is None or getattr(self, "_sincronizando_semantico", False):
+            return
+
+        otro = (self.arbol_sem_original
+                if current.treeWidget() is self.arbol_sem_anotado
+                else self.arbol_sem_anotado)
+        par = _item_por_ruta(otro, _ruta_item(current))
+        if par is not None:
+            self._sincronizando_semantico = True
+            try:
+                otro.setCurrentItem(par)
+                otro.scrollToItem(par)
+            finally:
+                self._sincronizando_semantico = False
+
+        node = current.data(0, Qt.UserRole)
+        if node and node.get("line"):
+            self._resaltar_en_editor(node.get("line"), node.get("value"))
+
+    def _on_traza_clicked(self, fila, _columna):
+        item = self.tabla_traza.item(fila, 0)
+        if item is not None and item.text().isdigit() and int(item.text()) > 0:
+            self._resaltar_en_editor(int(item.text()))
+
+    def abrir_arbol_anotado_en_ventana(self):
+        """Abre una ventana flotante con el árbol anotado (gráfico + listas)."""
+        self._ventana_arbol_anotado = VentanaArbol(
+            getattr(self, "_ultimo_ast_anotado", None),
+            getattr(self, "_ultimo_ast_anotado_abstracto", None),
+            self,
+            titulo="Árbol con anotaciones semánticas",
+            con_atributos=True,
+        )
+        self._ventana_arbol_anotado.show()
 
     # ─── Barra de Estado ──────────────────────────────────────────────────────
 
@@ -710,13 +875,13 @@ class SetupInterfaz:
 class VentanaArbol(QWidget):
     """Ventana independiente que muestra el árbol gráfico y el árbol lista."""
 
-    def __init__(self, ast_dict, ast_abstracto=None, parent=None):
+    def __init__(self, ast_dict, ast_abstracto=None, parent=None,
+                 titulo="Árbol Sintáctico", con_atributos=False):
         super().__init__(parent, Qt.Window)
-        self.setWindowTitle("Árbol Sintáctico — Vista Expandida")
+        self.setWindowTitle(f"{titulo} — Vista Expandida")
         self.resize(1300, 750)
         self.setStyleSheet("background-color: #1e1e1e;")
 
-        from PySide6.QtWidgets import QTreeWidget, QTreeWidgetItem
         from arbol_grafico import ArbolGraficoView
         from funciones_ide import _populate_tree_widget
 
@@ -738,32 +903,24 @@ class VentanaArbol(QWidget):
         lay_zoom = QHBoxLayout(barra_zoom)
         lay_zoom.setContentsMargins(8, 4, 8, 4)
 
-        lbl_titulo = QLabel("ÁRBOL VISUAL (AST)")
+        lbl_titulo = QLabel("ÁRBOL ANOTADO (AST)" if con_atributos else "ÁRBOL VISUAL (AST)")
         lbl_titulo.setStyleSheet("color: #4fc1ff; font-weight: bold;")
         lay_zoom.addWidget(lbl_titulo)
 
-        lbl_ayuda = QLabel("Ctrl+Rueda = zoom · Arrastra = mover")
+        ayuda = "Ctrl+Rueda = zoom · Arrastra = mover"
+        if con_atributos:
+            ayuda += " · ↑ sintetizado · ↓ heredado · =valor · @dirección · →conversión"
+        lbl_ayuda = QLabel(ayuda)
         lbl_ayuda.setStyleSheet("color: #858585; font-size: 11px;")
         lay_zoom.addWidget(lbl_ayuda)
         lay_zoom.addStretch()
 
-        estilo_btn = """
-            QPushButton {
-                background-color: #3e3e3e;
-                color: #f5f5f5;
-                border: none;
-                border-radius: 4px;
-                padding: 2px 10px;
-                font-weight: bold;
-            }
-            QPushButton:hover { background-color: #264f78; color: #ffffff; }
-        """
         self._grafico = ArbolGraficoView()
         btn_menos = QPushButton("−")
         btn_reset = QPushButton("1:1")
         btn_mas = QPushButton("+")
         for b in (btn_menos, btn_reset, btn_mas):
-            b.setStyleSheet(estilo_btn)
+            b.setStyleSheet(ESTILO_BOTON)
             b.setCursor(Qt.PointingHandCursor)
             lay_zoom.addWidget(b)
 
@@ -776,46 +933,11 @@ class VentanaArbol(QWidget):
         splitter.addWidget(lado_grafico)
 
         # ── Lado derecho: dos pestañas (AST abstracto + Gramática extendida) ──
-        estilo_arbol = """
-            QTreeWidget {
-                background-color: #1e1e1e;
-                color: #d4d4d4;
-                border: 1px solid #3e3e3e;
-                font-family: Consolas, monospace;
-                font-size: 13px;
-                outline: none;
-            }
-            QTreeWidget::item { padding: 3px 2px; }
-            QTreeWidget::item:selected { background-color: #264f78; color: #ffffff; }
-            QHeaderView::section {
-                background-color: #2d2d2d;
-                color: #ffffff;
-                padding: 5px;
-                border: 1px solid #3e3e3e;
-                font-weight: bold;
-            }
-        """
-
-        def _crear_lista(titulo):
-            w = QTreeWidget()
-            w.setHeaderLabel(titulo)
-            w.setStyleSheet(estilo_arbol)
-            w.header().setStretchLastSection(False)
-            w.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-            return w
-
-        self._lista_ast = _crear_lista("AST (abstracto)")
-        self._lista_gramatical = _crear_lista("Gramática (extendido)")
+        self._lista_ast = crear_arbol_lista("AST (abstracto)")
+        self._lista_gramatical = crear_arbol_lista("Gramática (extendido)")
 
         tabs_listas = QTabWidget()
-        tabs_listas.setStyleSheet("""
-            QTabWidget::pane { border: 1px solid #3e3e3e; }
-            QTabBar::tab {
-                background: #2d2d2d; color: #d4d4d4;
-                padding: 4px 12px; border: 1px solid #3e3e3e;
-            }
-            QTabBar::tab:selected { background: #264f78; color: #ffffff; }
-        """)
+        tabs_listas.setStyleSheet(ESTILO_SUBPESTANAS)
         tabs_listas.addTab(self._lista_ast, "AST")
         tabs_listas.addTab(self._lista_gramatical, "Gramática extendida")
         splitter.addWidget(tabs_listas)
@@ -829,7 +951,7 @@ class VentanaArbol(QWidget):
         # El árbol gráfico muestra el AST abstracto (más limpio en vista ampliada)
         arbol_grafico_src = ast_abstracto if ast_abstracto else ast_dict
         if arbol_grafico_src:
-            self._grafico.dibujar(arbol_grafico_src)
+            self._grafico.dibujar(arbol_grafico_src, con_atributos)
         if ast_abstracto:
             _populate_tree_widget(self._lista_ast, ast_abstracto)
             self._lista_ast.expandAll()
@@ -839,7 +961,8 @@ class VentanaArbol(QWidget):
             self._lista_gramatical.expandAll()
             self._lista_gramatical.resizeColumnToContents(0)
         if not arbol_grafico_src:
-            placeholder = QLabel("Ejecuta el análisis sintáctico primero.")
+            fase = "semántico" if con_atributos else "sintáctico"
+            placeholder = QLabel(f"Ejecuta el análisis {fase} primero.")
             placeholder.setStyleSheet("color: #858585; font-size: 14px;")
             placeholder.setAlignment(Qt.AlignCenter)
             layout.addWidget(placeholder)

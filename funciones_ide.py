@@ -342,7 +342,7 @@ def ejecutar_lexico(self):
 from PySide6.QtWidgets import QTreeWidgetItem
 from PySide6.QtGui import QFont
 from PySide6.QtCore import Qt
-from arbol_grafico import color_para
+from arbol_grafico import color_para, formatear_valor, COLOR_ERROR
 
 # ── Abstracción del AST ──────────────────────────────────────────────────────
 # El parser produce el árbol gramatical EXTENDIDO (árbol de derivación), con
@@ -375,12 +375,31 @@ def _abstraer_ast(node):
         # Caso 'x = ;' → expresión vacía.
         return {"type": "VACIO", "value": None, "line": node.get("line"), "children": []}
 
-    return {
-        "type":     _AST_RENAME.get(tipo, tipo),
-        "value":    node.get("value"),
-        "line":     node.get("line"),
-        "children": hijos,
-    }
+    # Se conservan las demás claves (columna, atributos semánticos del árbol anotado).
+    abstracto = {k: v for k, v in node.items() if k not in ("children", "_w")}
+    abstracto["type"] = _AST_RENAME.get(tipo, tipo)
+    abstracto["children"] = hijos
+    return abstracto
+
+
+def _formatear_atributos(attrs):
+    """Atributos semánticos de un nodo: [dtype=int↓, tipo=float↑, valor=3.5↑, …]."""
+    if not attrs:
+        return ""
+    partes = []
+    if "dtype" in attrs:
+        partes.append(f"dtype={attrs['dtype']}↓")
+    if attrs.get("tipo"):
+        partes.append(f"tipo={attrs['tipo']}↑")
+    if "valor" in attrs:
+        partes.append(f"valor={formatear_valor(attrs['valor'])}↑")
+    if "dir" in attrs:
+        partes.append(f"dir={attrs['dir']}")
+    if "conversion" in attrs:
+        partes.append(f"conv {attrs['conversion']}")
+    if "error" in attrs:
+        partes.append("ERROR")
+    return f"   [{', '.join(partes)}]" if partes else ""
 
 
 def _populate_tree_widget(parent_item, node):
@@ -391,6 +410,7 @@ def _populate_tree_widget(parent_item, node):
     tipo = str(node.get("type", ""))
     valor = node.get("value")
     linea = node.get("line")
+    attrs = node.get("atributos") or {}
 
     # Etiqueta: TIPO  valor  · L#   (todo en una sola columna, como la referencia)
     etiqueta = tipo
@@ -398,17 +418,70 @@ def _populate_tree_widget(parent_item, node):
         etiqueta += f"  {valor}"
     if linea:
         etiqueta += f"   · L{linea}"
+    # En el árbol anotado se agregan los atributos semánticos del nodo.
+    etiqueta += _formatear_atributos(attrs)
 
     item = QTreeWidgetItem(parent_item)
     item.setText(0, etiqueta)
     item.setData(0, Qt.UserRole, node)  # enlace al nodo AST para sincronización
 
-    # Color del texto según el tipo de nodo
+    # Color del texto según el tipo de nodo (rojo si tiene un error semántico)
     _bg, fg = color_para(tipo)
-    item.setForeground(0, QColor(fg))
+    if "error" in attrs:
+        item.setForeground(0, QColor(COLOR_ERROR))
+        item.setToolTip(0, attrs["error"])
+    else:
+        item.setForeground(0, QColor(fg))
 
     for child in node.get("children", []):
         _populate_tree_widget(item, child)
+
+
+def _llenar_arbol(arbol, node, aviso):
+    """Llena un QTreeWidget con un árbol (dict); si no hay árbol muestra un aviso."""
+    arbol.clear()
+    if node:
+        _populate_tree_widget(arbol, node)
+        arbol.expandAll()
+        arbol.resizeColumnToContents(0)
+    else:
+        err_item = QTreeWidgetItem(arbol)
+        err_item.setText(0, aviso)
+        err_item.setForeground(0, QColor("#ff6b6b"))
+
+
+def _mostrar_arbol_sintactico(self, ast_dict):
+    """
+    Muestra el árbol en las 3 vistas de la pestaña Árbol Sintáctico:
+    Vista 1: gráfica (cajas con zoom) — dibuja el árbol gramatical extendido.
+    Vista 2: AST abstracto (lista desplegable).
+    Vista 3: gramática extendida / árbol de derivación (lista desplegable).
+    """
+    self._ultimo_ast = ast_dict
+    self._ultimo_ast_abstracto = _abstraer_ast(ast_dict)
+
+    _llenar_arbol(self.arbol_sintactico, ast_dict, "⚠ No se pudo construir el árbol sintáctico.")
+    _llenar_arbol(self.arbol_ast, self._ultimo_ast_abstracto, "⚠ No se pudo construir el AST.")
+    self.arbol_grafico.dibujar(ast_dict)
+
+
+def _llenar_tabla_errores(self, errores_lexicos, errores_sintacticos, errores_semanticos=()):
+    """Llena la tabla de Errores con las listas de cada fase (línea, columna, descripción)."""
+    self.lista_errores.setRowCount(0)
+
+    # ✅ implemented by agent — labeled [SINTÁCTICO] and using columna
+    for etiqueta, errores in (("Léxico", errores_lexicos),
+                              ("[SINTÁCTICO]", errores_sintacticos),
+                              ("[SEMÁNTICO]", errores_semanticos)):
+        for error in errores:
+            fila = self.lista_errores.rowCount()
+            self.lista_errores.insertRow(fila)
+            self.lista_errores.setItem(fila, 0, QTableWidgetItem(etiqueta))
+            self.lista_errores.setItem(fila, 1, QTableWidgetItem(str(error.get("linea", ""))))
+            self.lista_errores.setItem(fila, 2, QTableWidgetItem(str(error.get("columna", ""))))
+            self.lista_errores.setItem(fila, 3, QTableWidgetItem(error.get("descripcion", "")))
+
+    self.lista_errores.resizeColumnsToContents()
 
 
 def ejecutar_sintactico(self):
@@ -487,63 +560,14 @@ def ejecutar_sintactico(self):
         return
 
     ast_dict = datos.get("ast")
-    self._ultimo_ast = ast_dict
     errores_lexicos = datos.get("errores_lexicos", [])
     errores_sintacticos = datos.get("errores_sintacticos", [])
 
     # ── Paso 5: Mostrar el árbol en sus 3 vistas ─────────────────────────
-    # Vista 1: gráfica (cajas con zoom) — dibuja el árbol gramatical extendido.
-    # Vista 2: AST abstracto (lista desplegable).
-    # Vista 3: gramática extendida / árbol de derivación (lista desplegable).
-    ast_abstracto = _abstraer_ast(ast_dict)
-    self._ultimo_ast_abstracto = ast_abstracto
-
-    # 5a. Árbol gramatical extendido (QTreeWidget coloreado)
-    self.arbol_sintactico.clear()
-    if ast_dict:
-        _populate_tree_widget(self.arbol_sintactico, ast_dict)
-        self.arbol_sintactico.expandAll()
-        self.arbol_sintactico.resizeColumnToContents(0)
-    else:
-        err_item = QTreeWidgetItem(self.arbol_sintactico)
-        err_item.setText(0, "⚠ No se pudo construir el árbol sintáctico.")
-        err_item.setForeground(0, QColor("#ff6b6b"))
-
-    # 5b. AST abstracto (QTreeWidget coloreado)
-    self.arbol_ast.clear()
-    if ast_abstracto:
-        _populate_tree_widget(self.arbol_ast, ast_abstracto)
-        self.arbol_ast.expandAll()
-        self.arbol_ast.resizeColumnToContents(0)
-    else:
-        err_item = QTreeWidgetItem(self.arbol_ast)
-        err_item.setText(0, "⚠ No se pudo construir el AST.")
-        err_item.setForeground(0, QColor("#ff6b6b"))
-
-    # 5c. Árbol gráfico (cajas con zoom)
-    self.arbol_grafico.dibujar(ast_dict)
+    _mostrar_arbol_sintactico(self, ast_dict)
 
     # ── Paso 6: Llenar la tabla de Errores ───────────────────────────────
-    self.lista_errores.setRowCount(0)
-
-    for error in errores_lexicos:
-        fila = self.lista_errores.rowCount()
-        self.lista_errores.insertRow(fila)
-        self.lista_errores.setItem(fila, 0, QTableWidgetItem("Léxico"))
-        self.lista_errores.setItem(fila, 1, QTableWidgetItem(str(error.get("linea", ""))))
-        self.lista_errores.setItem(fila, 2, QTableWidgetItem(str(error.get("columna", ""))))
-        self.lista_errores.setItem(fila, 3, QTableWidgetItem(error.get("descripcion", "")))
-
-    for error in errores_sintacticos:
-        fila = self.lista_errores.rowCount()
-        self.lista_errores.insertRow(fila)
-        # ✅ implemented by agent — labeled [SINTÁCTICO] and using columna
-        self.lista_errores.setItem(fila, 0, QTableWidgetItem("[SINTÁCTICO]"))
-        self.lista_errores.setItem(fila, 1, QTableWidgetItem(str(error.get("linea", ""))))
-        self.lista_errores.setItem(fila, 2, QTableWidgetItem(str(error.get("columna", ""))))
-        self.lista_errores.setItem(fila, 3, QTableWidgetItem(error.get("descripcion", "")))
-
-    self.lista_errores.resizeColumnsToContents()
+    _llenar_tabla_errores(self, errores_lexicos, errores_sintacticos)
 
     # ── Paso 7: Siempre mostrar el árbol; indicar errores en la barra ────
     total_errores = len(errores_lexicos) + len(errores_sintacticos)
@@ -560,3 +584,201 @@ def ejecutar_sintactico(self):
         self.barra_estado.showMessage(
             "Análisis sintáctico completado: sin errores ✓", 5000
         )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Ejecución del Analizador Semántico (Fase 3)
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Color de cada acción del recorrido semántico (misma paleta que los tokens).
+_COLORES_TRAZA = {
+    "DECLARAR":   "#4ec9b0",
+    "INSERTAR":   "#4ec9b0",
+    "BUSCAR":     "#4fc1ff",
+    "TIPO":       "#d7ba7d",
+    "CONVERSIÓN": "#ce9178",
+    "VERIFICAR":  "#b5cea8",
+    "ASIGNAR":    "#ffd700",
+    "VALOR":      "#858585",
+    "OMITIR":     "#858585",
+    "ERROR":      "#ff6b6b",
+}
+
+_COLORES_TIPO = {
+    "int":   "#b5cea8",
+    "float": "#4fc1ff",
+    "bool":  "#c586c0",
+}
+
+
+def _guardar_antes_de_compilar(self, fase):
+    """Guarda el archivo actual (o pide guardarlo). Devuelve False si se canceló."""
+    if not self.archivo_actual:
+        QMessageBox.warning(
+            self, "Archivo no guardado",
+            f"Debes guardar el archivo antes de ejecutar el análisis {fase}."
+        )
+        self.guardar_como_archivo()
+        return bool(self.archivo_actual)
+    self.guardar_archivo()
+    return True
+
+
+def _correr_script_compilador(self, script, fase, *args):
+    """Ejecuta compilador/<script> sobre el archivo actual y devuelve su stdout (o None)."""
+    ruta_ide = os.path.dirname(os.path.abspath(__file__))
+    ruta_script = os.path.join(ruta_ide, "compilador", script)
+
+    if not os.path.exists(ruta_script):
+        QMessageBox.critical(self, "Error", f"No se encontró el analizador {fase} en:\n{ruta_script}")
+        return None
+
+    try:
+        resultado = subprocess.run(
+            ["python", ruta_script, self.archivo_actual, *args],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,  # Timeout de seguridad (30 segundos)
+        )
+    except subprocess.TimeoutExpired:
+        QMessageBox.critical(self, "Error", f"El analizador {fase} tardó demasiado (timeout de 30s).")
+        return None
+    except Exception as e:
+        QMessageBox.critical(self, "Error", f"Error al ejecutar el analizador {fase}:\n{e}")
+        return None
+
+    salida = resultado.stdout.strip()
+    if not salida:
+        QMessageBox.critical(
+            self, f"Error del analizador {fase}",
+            f"El analizador {fase} no produjo salida.\n\nstderr:\n{resultado.stderr.strip()}"
+        )
+        return None
+    return salida
+
+
+def _llenar_traza(self, traza):
+    """Recorrido semántico: cada inserción, búsqueda, tipo, conversión y error."""
+    self.tabla_traza.setRowCount(0)
+    for paso in traza:
+        fila = self.tabla_traza.rowCount()
+        self.tabla_traza.insertRow(fila)
+        color = QColor(_COLORES_TRAZA.get(paso.get("accion"), "#d4d4d4"))
+        valores = (str(paso.get("linea", "")), paso.get("accion", ""), paso.get("detalle", ""))
+        for col, texto in enumerate(valores):
+            item = QTableWidgetItem(texto)
+            item.setForeground(color)
+            self.tabla_traza.setItem(fila, col, item)
+    self.tabla_traza.resizeColumnsToContents()
+
+
+def _llenar_tabla_simbolos(self, simbolos):
+    self.tabla_simbolos.setRowCount(0)
+    for simbolo in simbolos:
+        fila = self.tabla_simbolos.rowCount()
+        self.tabla_simbolos.insertRow(fila)
+        valor = simbolo.get("valor")
+        valores = (
+            simbolo.get("nombre", ""),
+            simbolo.get("tipo", ""),
+            str(simbolo.get("direccion", "")),
+            str(simbolo.get("tamano", "")),
+            formatear_valor(valor) if valor is not None else "—",
+            simbolo.get("ambito", ""),
+            str(simbolo.get("linea_declaracion", "")),
+            ", ".join(str(n) for n in simbolo.get("lineas", [])),
+        )
+        color = QColor(_COLORES_TIPO.get(simbolo.get("tipo"), "#d4d4d4"))
+        for col, texto in enumerate(valores):
+            item = QTableWidgetItem(texto)
+            if col == 1:
+                item.setForeground(color)
+            self.tabla_simbolos.setItem(fila, col, item)
+    self.tabla_simbolos.resizeColumnsToContents()
+
+
+def ejecutar_semantico(self):
+    """
+    Ejecuta el analizador semántico sobre el archivo actual.
+    1. Guarda el archivo e invoca semantico.py vía subprocess (IPC, JSON en stdout).
+    2. Muestra el AST de la fase sintáctica (pestaña Árbol Sintáctico).
+    3. Muestra AST original vs. AST anotado y el recorrido (pestaña Semántica).
+    4. Llena la tabla de símbolos y la tabla de errores (léxicos, sintácticos y semánticos).
+    """
+    if not _guardar_antes_de_compilar(self, "semántico"):
+        return
+
+    self.barra_estado.showMessage("Ejecutando análisis semántico...", 5000)
+    salida = _correr_script_compilador(self, "semantico.py", "semántico")
+    if salida is None:
+        return
+
+    try:
+        datos = json.loads(salida)
+    except json.JSONDecodeError as e:
+        QMessageBox.critical(
+            self, "Error de formato",
+            f"La salida del analizador semántico no es JSON válido:\n{e}\n\nSalida:\n{salida[:500]}"
+        )
+        return
+
+    errores_lexicos = datos.get("errores_lexicos", [])
+    errores_sintacticos = datos.get("errores_sintacticos", [])
+    errores_semanticos = datos.get("errores_semanticos", [])
+
+    # AST de la fase anterior (base del análisis)
+    _mostrar_arbol_sintactico(self, datos.get("ast"))
+
+    # AST original → AST con anotaciones semánticas (misma forma, nodo por nodo)
+    self._ultimo_ast_anotado = datos.get("ast_anotado")
+    self._ultimo_ast_anotado_abstracto = _abstraer_ast(self._ultimo_ast_anotado)
+    _llenar_arbol(self.arbol_sem_original, self._ultimo_ast_abstracto, "⚠ No se pudo construir el AST.")
+    _llenar_arbol(self.arbol_sem_anotado, self._ultimo_ast_anotado_abstracto,
+                  "⚠ No se pudo construir el árbol anotado.")
+
+    _llenar_traza(self, datos.get("traza", []))
+    _llenar_tabla_simbolos(self, datos.get("tabla_simbolos", []))
+    _llenar_tabla_errores(self, errores_lexicos, errores_sintacticos, errores_semanticos)
+
+    self.tabs_resultados.setCurrentIndex(self.tabs_resultados.indexOf(self.tab_semantico))
+
+    previos = len(errores_lexicos) + len(errores_sintacticos)
+    if errores_semanticos or previos:
+        detalle = f"{len(errores_semanticos)} error(es) semántico(s)"
+        if previos:
+            detalle += f" y {previos} léxico(s)/sintáctico(s)"
+        self.barra_estado.showMessage(
+            f"Análisis semántico: {detalle} — nodos con error en rojo · ver pestaña Errores", 8000
+        )
+    else:
+        self.barra_estado.showMessage(
+            f"Análisis semántico completado: sin errores ✓ "
+            f"({len(datos.get('tabla_simbolos', []))} símbolos)", 5000
+        )
+
+
+def exportar_reporte_semantico(self):
+    """Guarda en un .txt el árbol anotado, la tabla de símbolos, los errores y el recorrido."""
+    if not _guardar_antes_de_compilar(self, "semántico"):
+        return
+
+    reporte = _correr_script_compilador(self, "semantico.py", "semántico", "--reporte")
+    if reporte is None:
+        return
+
+    base, _ext = os.path.splitext(self.archivo_actual)
+    ruta, _ = QFileDialog.getSaveFileName(
+        self, "Exportar reporte semántico", f"{base}_semantico.txt",
+        "Archivos de texto (*.txt);;Todos los archivos (*)"
+    )
+    if not ruta:
+        return
+
+    try:
+        with open(ruta, "w", encoding="utf-8") as archivo:
+            archivo.write(reporte + "\n")
+        self.barra_estado.showMessage(f"Reporte semántico guardado en {ruta}", 5000)
+    except Exception as e:
+        QMessageBox.critical(self, "Error", f"No se pudo guardar el reporte:\n{e}")

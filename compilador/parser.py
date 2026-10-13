@@ -77,13 +77,16 @@ import ply.yacc as yacc
 
 class ASTNode:
     # ✅ already present
-    __slots__ = ("type", "children", "value", "line")
+    __slots__ = ("type", "children", "value", "line", "column")
 
-    def __init__(self, type, children=None, value=None, line=None):
+    def __init__(self, type, children=None, value=None, line=None, column=None):
         self.type     = type
         self.children = children or []
         self.value    = value
         self.line     = line
+        # Columna (base 1) del token que origina el nodo; la conserva el
+        # análisis semántico para reportar errores con línea y columna.
+        self.column   = column
 
 def ast_to_dict(node):
     # ✅ already present
@@ -93,6 +96,7 @@ def ast_to_dict(node):
         "type":     node.type,
         "value":    node.value,
         "line":     node.line,
+        "column":   node.column,
         "children": [ast_to_dict(c) for c in node.children if c is not None],
     }
 
@@ -232,7 +236,7 @@ def _construir_ast_parcial():
 # ✅ implemented by agent — Every non-terminal in the grammar has a corresponding p_* function.
 def p_programa(p):
     """programa : MAIN LLAVE_IZQ lista_declaracion LLAVE_DER"""
-    p[0] = ASTNode("PROGRAMA", [p[3]], line=p.lineno(1))
+    p[0] = ASTNode("PROGRAMA", [p[3]], line=p.lineno(1), column=p.lexpos(1))
 
 def p_lista_declaracion_multi(p):
     """lista_declaracion : lista_declaracion declaracion"""
@@ -244,7 +248,7 @@ def p_lista_declaracion_multi(p):
 
 def p_lista_declaracion_single(p):
     """lista_declaracion : declaracion"""
-    p[0] = ASTNode("LISTA_DECLARACION", [p[1]], line=p[1].line)
+    p[0] = ASTNode("LISTA_DECLARACION", [p[1]], line=p[1].line, column=p[1].column)
 
 def p_declaracion_var(p):
     """declaracion : declaracion_variable"""
@@ -262,7 +266,7 @@ def p_declaracion_sent(p):
 # de modo que el resto del árbol se sigue construyendo (igual que la referencia).
 def p_declaracion_error(p):
     """declaracion : error PUNTO_Y_COMA"""
-    p[0] = ASTNode("ERROR_SINTACTICO", line=p.lineno(2))
+    p[0] = ASTNode("ERROR_SINTACTICO", line=p.lineno(2), column=p.lexpos(2))
     _declaraciones_parseadas.append(p[0])
 
 def p_declaracion_variable(p):
@@ -273,6 +277,7 @@ def p_declaracion_variable(p):
         "DECLARACION_VARIABLE",
         [p[1]] + p[2],
         line=p[1].line,
+        column=p[1].column,
     )
 
 def p_declaracion_variable_asignacion(p):
@@ -281,35 +286,36 @@ def p_declaracion_variable_asignacion(p):
         "DECLARACION_VARIABLE",
         [
             p[1],
-            ASTNode("ID", value=p[2], line=p.lineno(2)),
+            ASTNode("ID", value=p[2], line=p.lineno(2), column=p.lexpos(2)),
             p[4],
         ],
         value="=",
         line=p[1].line,
+        column=p[1].column,
     )
 
 # 'identificador' acumula los ID en una lista de Python (no en un árbol binario),
 # de modo que 'int x,y,z,r;' produzca cuatro hermanos al mismo nivel.
 def p_identificador_single(p):
     """identificador : IDENTIFICADOR"""
-    p[0] = [ASTNode("ID", value=p[1], line=p.lineno(1))]
+    p[0] = [ASTNode("ID", value=p[1], line=p.lineno(1), column=p.lexpos(1))]
 
 def p_identificador_multi(p):
     """identificador : identificador COMA IDENTIFICADOR"""
-    p[0] = p[1] + [ASTNode("ID", value=p[3], line=p.lineno(3))]
+    p[0] = p[1] + [ASTNode("ID", value=p[3], line=p.lineno(3), column=p.lexpos(3))]
 
 def p_tipo(p):
     """tipo : INT
             | FLOAT
             | BOOL"""
-    p[0] = ASTNode("TIPO", value=p[1], line=p.lineno(1))
+    p[0] = ASTNode("TIPO", value=p[1], line=p.lineno(1), column=p.lexpos(1))
 
 def p_lista_sentencias_multi(p):
     """lista_sentencias : lista_sentencias sentencia"""
     global _ultima_lista_sentencias
     # Lista plana: las sentencias se acumulan como hermanas en el mismo nodo.
     if p[1] is None:
-        p[0] = ASTNode("LISTA_SENTENCIAS", [p[2]], line=p[2].line)
+        p[0] = ASTNode("LISTA_SENTENCIAS", [p[2]], line=p[2].line, column=p[2].column)
     else:
         p[1].children.append(p[2])
         p[0] = p[1]
@@ -334,7 +340,7 @@ def p_sentencia(p):
 # ERROR_SINTACTICO, sin destruir el bloque ni el resto del árbol.
 def p_sentencia_error(p):
     """sentencia : error PUNTO_Y_COMA"""
-    p[0] = ASTNode("ERROR_SINTACTICO", line=p.lineno(2))
+    p[0] = ASTNode("ERROR_SINTACTICO", line=p.lineno(2), column=p.lexpos(2))
 
 # La asignación con ';' reutiliza 'asignacion_simple' (id = expresion) para no
 # duplicar la producción 'IDENTIFICADOR ASIGNACION expresion' (evita un conflicto
@@ -342,14 +348,23 @@ def p_sentencia_error(p):
 def p_asignacion(p):
     """asignacion : asignacion_simple PUNTO_Y_COMA"""
     ident, expr = p[1].children[0], p[1].children[1]
-    p[0] = ASTNode("ASIGNACION", [ident, ASTNode("SENT_EXPRESION", [expr], line=expr.line)], line=p[1].line)
+    p[0] = ASTNode(
+        "ASIGNACION",
+        [ident, ASTNode("SENT_EXPRESION", [expr], line=expr.line, column=expr.column)],
+        line=p[1].line,
+        column=p[1].column,
+    )
 
 def p_asignacion_vacia(p):
     """asignacion : IDENTIFICADOR ASIGNACION PUNTO_Y_COMA"""
     p[0] = ASTNode(
         "ASIGNACION",
-        [ASTNode("ID", value=p[1], line=p.lineno(1)), ASTNode("SENT_EXPRESION", line=p.lineno(2))],
+        [
+            ASTNode("ID", value=p[1], line=p.lineno(1), column=p.lexpos(1)),
+            ASTNode("SENT_EXPRESION", line=p.lineno(2), column=p.lexpos(2)),
+        ],
         line=p.lineno(1),
+        column=p.lexpos(1),
     )
 
 # Terminador de bloque: acepta 'end' o 'end;' (el ';' final es opcional, como en
@@ -363,22 +378,22 @@ def p_fin_bloque(p):
 # dangling else, porque el 'else' solo puede pertenecer al 'if' aún abierto.
 def p_seleccion_if(p):
     """seleccion : IF expresion THEN lista_sentencias fin_bloque"""
-    p[0] = ASTNode("SELECCION", [p[2], p[4]], line=p.lineno(1))
+    p[0] = ASTNode("SELECCION", [p[2], p[4]], line=p.lineno(1), column=p.lexpos(1))
 
 def p_seleccion_if_else(p):
     """seleccion : IF expresion THEN lista_sentencias ELSE lista_sentencias fin_bloque"""
-    p[0] = ASTNode("SELECCION", [p[2], p[4], p[6]], line=p.lineno(1))
+    p[0] = ASTNode("SELECCION", [p[2], p[4], p[6]], line=p.lineno(1), column=p.lexpos(1))
 
 def p_iteracion(p):
     """iteracion : WHILE expresion lista_sentencias fin_bloque"""
-    p[0] = ASTNode("ITERACION", [p[2], p[3]], line=p.lineno(1))
+    p[0] = ASTNode("ITERACION", [p[2], p[3]], line=p.lineno(1), column=p.lexpos(1))
 
 # El ';' final cierra el do-while de forma inequívoca (estilo C: do ... while(c);).
 # Sin él, un 'while' que siguiera al do-while sería ambiguo (¿cierra el do o
 # inicia un ciclo nuevo?). El terminador elimina ese conflicto.
 def p_repeticion(p):
     """repeticion : DO lista_sentencias WHILE expresion PUNTO_Y_COMA"""
-    p[0] = ASTNode("REPETICION", [p[2], p[4]], line=p.lineno(1))
+    p[0] = ASTNode("REPETICION", [p[2], p[4]], line=p.lineno(1), column=p.lexpos(1))
 
 # Ciclo for: for ( init ; condicion ; incremento ) cuerpo end
 # El AST agrupa explícitamente inicialización, condición, incremento y cuerpo
@@ -388,24 +403,34 @@ def p_iteracion_for(p):
     p[0] = ASTNode(
         "CICLO_FOR",
         [
-            ASTNode("INICIALIZACION", [p[3]], line=p[3].line),
-            ASTNode("CONDICION", [p[5]], line=p[5].line),
-            ASTNode("INCREMENTO", [p[7]], line=p[7].line),
-            ASTNode("CUERPO", [p[9]] if p[9] is not None else [], line=p.lineno(1)),
+            ASTNode("INICIALIZACION", [p[3]], line=p[3].line, column=p[3].column),
+            ASTNode("CONDICION", [p[5]], line=p[5].line, column=p[5].column),
+            ASTNode("INCREMENTO", [p[7]], line=p[7].line, column=p[7].column),
+            ASTNode("CUERPO", [p[9]] if p[9] is not None else [], line=p.lineno(1), column=p.lexpos(1)),
         ],
         line=p.lineno(1),
+        column=p.lexpos(1),
     )
 
 # Asignación sin ';' (reutilizable en la inicialización del for).
 def p_asignacion_simple(p):
     """asignacion_simple : IDENTIFICADOR ASIGNACION expresion"""
-    p[0] = ASTNode("ASIGNACION", [ASTNode("ID", value=p[1], line=p.lineno(1)), p[3]], line=p.lineno(1))
+    p[0] = ASTNode(
+        "ASIGNACION",
+        [ASTNode("ID", value=p[1], line=p.lineno(1), column=p.lexpos(1)), p[3]],
+        line=p.lineno(1),
+        column=p.lexpos(1),
+    )
 
 # Incremento/decremento: i++ , i-- o i = expresion
 def p_incremento_postfijo(p):
     """incremento : IDENTIFICADOR MAS_MAS
                   | IDENTIFICADOR MENOS_MENOS"""
-    p[0] = ASTNode("INCREMENTO_OP", [ASTNode("ID", value=p[1], line=p.lineno(1))], value=p[2], line=p.lineno(1))
+    p[0] = ASTNode(
+        "INCREMENTO_OP",
+        [ASTNode("ID", value=p[1], line=p.lineno(1), column=p.lexpos(1))],
+        value=p[2], line=p.lineno(1), column=p.lexpos(1),
+    )
 
 def p_incremento_asignacion(p):
     """incremento : asignacion_simple"""
@@ -417,47 +442,65 @@ def p_incremento_asignacion(p):
 def p_sentencia_incremento(p):
     """sentencia : IDENTIFICADOR MAS_MAS PUNTO_Y_COMA
                  | IDENTIFICADOR MENOS_MENOS PUNTO_Y_COMA"""
-    p[0] = ASTNode("INCREMENTO_OP", [ASTNode("ID", value=p[1], line=p.lineno(1))], value=p[2], line=p.lineno(1))
+    p[0] = ASTNode(
+        "INCREMENTO_OP",
+        [ASTNode("ID", value=p[1], line=p.lineno(1), column=p.lexpos(1))],
+        value=p[2], line=p.lineno(1), column=p.lexpos(1),
+    )
 
 # PUNTO_Y_COMA present
 # identifier form correct (terminal)
 def p_sent_in(p):
     """sent_in : CIN EXTRACCION IDENTIFICADOR PUNTO_Y_COMA"""
-    p[0] = ASTNode("SENT_IN", [ASTNode("ID", value=p[3], line=p.lineno(3))], line=p.lineno(1))
+    p[0] = ASTNode(
+        "SENT_IN",
+        [ASTNode("ID", value=p[3], line=p.lineno(3), column=p.lexpos(3))],
+        line=p.lineno(1), column=p.lexpos(1),
+    )
 
 # PUNTO_Y_COMA present
 def p_sent_out(p):
     """sent_out : COUT INSERCION salida PUNTO_Y_COMA"""
-    p[0] = ASTNode("SENT_OUT", [p[3]], line=p.lineno(1))
+    p[0] = ASTNode("SENT_OUT", [p[3]], line=p.lineno(1), column=p.lexpos(1))
 
 def p_salida_cadena(p):
     """salida : CADENA"""
-    p[0] = ASTNode("SALIDA_CADENA", value=p[1], line=p.lineno(1))
+    p[0] = ASTNode("SALIDA_CADENA", value=p[1], line=p.lineno(1), column=p.lexpos(1))
 
 def p_salida_expresion(p):
     """salida : expresion"""
-    p[0] = ASTNode("SALIDA_EXPRESION", [p[1]], line=p[1].line)
+    p[0] = ASTNode("SALIDA_EXPRESION", [p[1]], line=p[1].line, column=p[1].column)
 
 def p_salida_mix1(p):
     """salida : CADENA INSERCION expresion"""
-    p[0] = ASTNode("SALIDA_MIXTA", [ASTNode("SALIDA_CADENA", value=p[1], line=p.lineno(1)), p[3]], line=p.lineno(1))
+    p[0] = ASTNode(
+        "SALIDA_MIXTA",
+        [ASTNode("SALIDA_CADENA", value=p[1], line=p.lineno(1), column=p.lexpos(1)), p[3]],
+        line=p.lineno(1), column=p.lexpos(1),
+    )
 
 def p_salida_mix2(p):
     """salida : expresion INSERCION CADENA"""
-    p[0] = ASTNode("SALIDA_MIXTA", [p[1], ASTNode("SALIDA_CADENA", value=p[3], line=p.lineno(3))], line=p[1].line)
+    p[0] = ASTNode(
+        "SALIDA_MIXTA",
+        [p[1], ASTNode("SALIDA_CADENA", value=p[3], line=p.lineno(3), column=p.lexpos(3))],
+        line=p[1].line, column=p[1].column,
+    )
 
 def p_expresion_simple_only(p):
     """expresion : expresion_simple"""
     p[0] = p[1]
 
+# Las OPERACION toman línea y columna del operador: es la posición que se
+# reporta cuando el semántico detecta un uso indebido del operador.
 def p_expresion_rel(p):
     """expresion : expresion_simple rel_op expresion_simple"""
-    p[0] = ASTNode("OPERACION", [p[1], p[3]], value=p[2].value, line=p[1].line)
+    p[0] = ASTNode("OPERACION", [p[1], p[3]], value=p[2].value, line=p[2].line, column=p[2].column)
 
 def p_expresion_logica(p):
     """expresion : expresion AND expresion
                  | expresion OR expresion"""
-    p[0] = ASTNode("OPERACION", [p[1], p[3]], value=p[2], line=p[1].line)
+    p[0] = ASTNode("OPERACION", [p[1], p[3]], value=p[2], line=p.lineno(2), column=p.lexpos(2))
 
 def p_rel_op(p):
     """rel_op : MENOR
@@ -466,12 +509,12 @@ def p_rel_op(p):
               | MAYOR_IGUAL
               | IGUAL_IGUAL
               | DIFERENTE"""
-    p[0] = ASTNode("REL_OP", value=p[1], line=p.lineno(1))
+    p[0] = ASTNode("REL_OP", value=p[1], line=p.lineno(1), column=p.lexpos(1))
 
 def p_expresion_simple_suma(p):
     """expresion_simple : expresion_simple suma_op termino"""
     # Recursión por la izquierda -> asociatividad izquierda: a - b - c = (a - b) - c
-    p[0] = ASTNode("OPERACION", [p[1], p[3]], value=p[2].value, line=p[1].line)
+    p[0] = ASTNode("OPERACION", [p[1], p[3]], value=p[2].value, line=p[2].line, column=p[2].column)
 
 def p_expresion_simple_term(p):
     """expresion_simple : termino"""
@@ -482,12 +525,12 @@ def p_suma_op(p):
                | MENOS
                | MAS_MAS
                | MENOS_MENOS"""
-    p[0] = ASTNode("SUMA_OP", value=p[1], line=p.lineno(1))
+    p[0] = ASTNode("SUMA_OP", value=p[1], line=p.lineno(1), column=p.lexpos(1))
 
 def p_termino_mult(p):
     """termino : termino mult_op factor"""
     # '*', '/', '%' ligan más fuerte que '+'/'-' por estar en un nivel inferior.
-    p[0] = ASTNode("OPERACION", [p[1], p[3]], value=p[2].value, line=p[1].line)
+    p[0] = ASTNode("OPERACION", [p[1], p[3]], value=p[2].value, line=p[2].line, column=p[2].column)
 
 def p_termino_factor(p):
     """termino : factor"""
@@ -497,11 +540,11 @@ def p_mult_op(p):
     """mult_op : POR
                | ENTRE
                | MODULO"""
-    p[0] = ASTNode("MULT_OP", value=p[1], line=p.lineno(1))
+    p[0] = ASTNode("MULT_OP", value=p[1], line=p.lineno(1), column=p.lexpos(1))
 
 def p_factor_pot(p):
     """factor : factor pot_op componente"""
-    p[0] = ASTNode("OPERACION", [p[1], p[3]], value=p[2].value, line=p[1].line)
+    p[0] = ASTNode("OPERACION", [p[1], p[3]], value=p[2].value, line=p[2].line, column=p[2].column)
 
 def p_factor_comp(p):
     """factor : componente"""
@@ -509,12 +552,12 @@ def p_factor_comp(p):
 
 def p_pot_op(p):
     """pot_op : POTENCIA"""
-    p[0] = ASTNode("POT_OP", value=p[1], line=p.lineno(1))
+    p[0] = ASTNode("POT_OP", value=p[1], line=p.lineno(1), column=p.lexpos(1))
 
 def p_numero(p):
     """numero : NUMERO_ENTERO
               | NUMERO_REAL"""
-    p[0] = ASTNode("NUMERO", value=p[1], line=p.lineno(1))
+    p[0] = ASTNode("NUMERO", value=p[1], line=p.lineno(1), column=p.lexpos(1))
 
 def p_componente_paren(p):
     """componente : PARENTESIS_IZQ expresion PARENTESIS_DER"""
@@ -526,21 +569,21 @@ def p_componente_numero(p):
 
 def p_componente_id(p):
     """componente : IDENTIFICADOR"""
-    p[0] = ASTNode("COMPONENTE_ID", value=p[1], line=p.lineno(1))
+    p[0] = ASTNode("COMPONENTE_ID", value=p[1], line=p.lineno(1), column=p.lexpos(1))
 
 def p_componente_bool(p):
     """componente : BOOL"""
-    p[0] = ASTNode("COMPONENTE_BOOL", value=p[1], line=p.lineno(1))
+    p[0] = ASTNode("COMPONENTE_BOOL", value=p[1], line=p.lineno(1), column=p.lexpos(1))
 
 def p_componente_logico(p):
     """componente : op_logico componente"""
-    p[0] = ASTNode("COMPONENTE_UNARIO", [p[1], p[2]], line=p[1].line)
+    p[0] = ASTNode("COMPONENTE_UNARIO", [p[1], p[2]], line=p[1].line, column=p[1].column)
 
 def p_op_logico(p):
     """op_logico : AND
                  | OR
                  | NOT"""
-    p[0] = ASTNode("OP_LOGICO", value=p[1], line=p.lineno(1))
+    p[0] = ASTNode("OP_LOGICO", value=p[1], line=p.lineno(1), column=p.lexpos(1))
 
 def p_error(p):
     """Manejo de errores sintácticos con recuperación a nivel de sentencia.

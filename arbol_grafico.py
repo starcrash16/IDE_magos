@@ -110,6 +110,44 @@ def color_para(tipo):
     return bg, fg
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Atributos semánticos (árbol anotado)
+# ──────────────────────────────────────────────────────────────────────────────
+COLOR_ATRIBUTOS = "#e2e2e2"
+COLOR_ERROR = "#ff6b6b"
+
+
+def formatear_valor(valor):
+    """Representación legible de un valor calculado en compilación."""
+    if isinstance(valor, bool):
+        return "true" if valor else "false"
+    if isinstance(valor, float):
+        texto = f"{valor:.6g}"
+        if "." not in texto and "e" not in texto and "inf" not in texto:
+            texto += ".0"
+        return texto
+    return str(valor)
+
+
+def resumen_atributos(attrs):
+    """Versión compacta de los atributos para la caja del árbol gráfico."""
+    if not attrs:
+        return ""
+    partes = []
+    if "dtype" in attrs:
+        partes.append(f"↓{attrs['dtype']}")
+    if attrs.get("tipo"):
+        partes.append(f"↑{attrs['tipo']}")
+    if "valor" in attrs:
+        partes.append(f"={formatear_valor(attrs['valor'])}")
+    if "dir" in attrs:
+        partes.append(f"@{attrs['dir']}")
+    if "conversion" in attrs:
+        partes.append(f"→{attrs['conversion'].split('→')[-1]}")
+    texto = " ".join(partes)
+    return (texto[:23] + "…") if len(texto) > 24 else texto
+
+
 class ArbolGraficoView(QGraphicsView):
     """Dibuja un AST (dict) como árbol gráfico de cajas con zoom y pan."""
 
@@ -135,13 +173,21 @@ class ArbolGraficoView(QGraphicsView):
         self._scale = 1.0
         self._pos = {}            # id(nodo) -> (cx, cy)
         self._highlight_item = None
+        self._con_atributos = False
 
     # ── API pública ────────────────────────────────────────────────────────
-    def dibujar(self, ast_dict):
-        """Reconstruye la escena a partir de un nodo AST (dict) o None."""
+    def dibujar(self, ast_dict, con_atributos=False):
+        """
+        Reconstruye la escena a partir de un nodo AST (dict) o None.
+        con_atributos=True agrega a cada caja una línea con los atributos
+        semánticos (árbol anotado), por lo que las cajas son más grandes.
+        """
         self._scene.clear()
         self._pos.clear()
         self._highlight_item = None
+        self._con_atributos = con_atributos
+        self.NODE_W = 170 if con_atributos else ArbolGraficoView.NODE_W
+        self.NODE_H = 64 if con_atributos else ArbolGraficoView.NODE_H
 
         if not ast_dict:
             aviso = self._scene.addText(
@@ -273,6 +319,8 @@ class ArbolGraficoView(QGraphicsView):
     def _dibujar_cajas(self, node):
         cx, cy = self._pos[id(node)]
         bg, fg = color_para(node.get("type", ""))
+        attrs = node.get("atributos") or {}
+        con_error = "error" in attrs
 
         x1 = cx - self.NODE_W / 2
         y1 = cy - self.NODE_H / 2
@@ -282,10 +330,11 @@ class ArbolGraficoView(QGraphicsView):
         sombra.addRoundedRect(QRectF(x1 + 2, y1 + 3, self.NODE_W, self.NODE_H), 8, 8)
         self._scene.addPath(sombra, QPen(Qt.NoPen), QBrush(QColor("#141414")))
 
-        # Caja
+        # Caja (borde rojo si el nodo tiene un error semántico)
         caja = QPainterPath()
         caja.addRoundedRect(QRectF(x1, y1, self.NODE_W, self.NODE_H), 8, 8)
-        self._scene.addPath(caja, QPen(QColor(fg), 1.6), QBrush(QColor(bg)))
+        borde = QPen(QColor(COLOR_ERROR if con_error else fg), 2.4 if con_error else 1.6)
+        self._scene.addPath(caja, borde, QBrush(QColor(bg)))
 
         # Texto: tipo (negrita) + sub-etiqueta (valor o línea)
         tipo = str(node.get("type", ""))
@@ -299,7 +348,16 @@ class ArbolGraficoView(QGraphicsView):
         elif linea:
             sub = f"L{linea}"
 
-        if sub:
+        if self._con_atributos:
+            # Tres líneas: tipo de nodo · valor/línea · atributos semánticos
+            resumen = "ERROR" if con_error else resumen_atributos(attrs)
+            self._texto(tipo, cx, cy - 17, fg, 9, bold=True)
+            if sub:
+                self._texto(sub, cx, cy, fg, 8, bold=False)
+            if resumen:
+                color = COLOR_ERROR if con_error else COLOR_ATRIBUTOS
+                self._texto(resumen, cx, cy + 17, color, 8, bold=True)
+        elif sub:
             self._texto(tipo, cx, cy - 8, fg, 9, bold=True)
             self._texto(sub, cx, cy + 9, fg, 8, bold=False)
         else:

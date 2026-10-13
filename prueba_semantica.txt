@@ -1,0 +1,46 @@
+main {
+int x, y, z;
+float a, b;
+bool ok;
+int i = 0;
+float pi = 3.14;
+
+x = 10;
+y = x * 2 + 1;
+a = x + 0.5;
+b = 7;
+z = 7 / 2;
+ok = x > y;
+
+if ok && a >= 2 then
+    y = y + 1;
+else
+    y = 0;
+end
+
+while i < 5
+    i = i + 1;
+    a = a * 2;
+end
+
+for (i = 0; i < 3; i++)
+    cout << "i = " << i;
+end
+
+do
+    cin >> x;
+while x != 0;
+
+int x;
+w = 5;
+x = 3.5;
+ok = 3 + 4;
+z = ok + 1;
+z = 5 % 2.0;
+if x + 1 then
+    y = 2;
+end
+ok = !x;
+ok = x == ok;
+z = x / 0;
+}

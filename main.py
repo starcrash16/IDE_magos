@@ -14,6 +14,8 @@ from funciones_ide import (
     guardar_como_archivo,
     ejecutar_lexico,
     ejecutar_sintactico,
+    ejecutar_semantico,
+    exportar_reporte_semantico,
     _hay_cambios_sin_guardar,
     _confirmar_perder_cambios_o_guardar,
 )
@@ -41,6 +43,8 @@ CompiladorIDE.guardar_archivo                    = guardar_archivo
 CompiladorIDE.guardar_como_archivo               = guardar_como_archivo
 CompiladorIDE.ejecutar_lexico                    = ejecutar_lexico
 CompiladorIDE.ejecutar_sintactico                = ejecutar_sintactico
+CompiladorIDE.ejecutar_semantico                 = ejecutar_semantico
+CompiladorIDE.exportar_reporte_semantico         = exportar_reporte_semantico
 CompiladorIDE._hay_cambios_sin_guardar           = _hay_cambios_sin_guardar
 CompiladorIDE._confirmar_perder_cambios_o_guardar = _confirmar_perder_cambios_o_guardar
 
