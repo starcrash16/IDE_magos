@@ -132,7 +132,7 @@ class TablaSimbolos:
     def registrar_linea(self, nombre, linea):
         """Agrega la línea a la lista de referencias del identificador."""
         entrada = self._entradas.get(nombre)
-        if entrada is not None and linea and linea not in entrada["lineas"]:
+        if entrada is not None and linea:
             entrada["lineas"].append(linea)
 
     def valores(self):

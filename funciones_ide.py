@@ -10,6 +10,7 @@ import subprocess
 import json
 import os
 from PySide6.QtGui import QColor
+import sys
 
 from PySide6.QtWidgets import QFileDialog, QMessageBox, QTableWidgetItem
 
@@ -635,7 +636,7 @@ def _correr_script_compilador(self, script, fase, *args):
 
     try:
         resultado = subprocess.run(
-            ["python", ruta_script, self.archivo_actual, *args],
+            [sys.executable, ruta_script, self.archivo_actual, *args],
             capture_output=True,
             text=True,
             encoding="utf-8",
